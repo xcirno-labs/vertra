@@ -6,10 +6,12 @@ use crate::event::{Event, EventLoopWindowTarget, EventLoop, WindowEvent};
 use crate::pipeline::{Pipeline};
 
 use std::sync::Arc;
+use crate::camera::Camera;
 use crate::mesh::Mesh;
+use crate::scene::Scene;
 
 type UpdateCallback = Box<dyn FnMut(f32)>;
-type DrawCallback = Box<dyn FnMut(&mut Mesh)>;
+type DrawCallback = Box<dyn FnMut(&mut Scene)>;
 type EventCallback = Box<dyn FnMut(Event<()>, &EventLoopWindowTarget<()>)>;
 type CloseCallback = Box<dyn FnMut(WindowEvent, &EventLoopWindowTarget<()>)>;
 
@@ -36,6 +38,7 @@ pub struct Window {
     on_window_close_fn: CloseCallback,
     on_update_fn: Option<UpdateCallback>,
     on_draw_requested_fn: Option<DrawCallback>,
+    camera: Option<Camera>,
 }
 impl Window {
     pub fn new() -> Self {
@@ -48,6 +51,7 @@ impl Window {
                 elwt.exit();
             }),
             on_draw_requested_fn: None,
+            camera: None
         }
     }
 
@@ -59,6 +63,14 @@ impl Window {
     pub fn with_dimensions(mut self, width: u32, height: u32) -> Self {
         self.config.width = width;
         self.config.height = height;
+        self
+    }
+
+    pub fn with_camera(mut self, camera: Camera) -> Self {
+        let camera = camera.with_aspect(
+            self.config.width as f32 / self.config.height as f32
+        );
+        self.camera = Some(camera);
         self
     }
 
@@ -76,7 +88,7 @@ impl Window {
     }
 
     pub fn on_draw_request<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut Mesh) + 'static {
+    where F: FnMut(&mut Scene) + 'static {
         self.on_draw_requested_fn = Some(Box::new(function));
         self
     }
@@ -95,15 +107,24 @@ impl Window {
             .build(&event_loop)
             .unwrap();
 
+        let size = winit_window.inner_size();
 
-        let mut vertex_batch = Mesh::new();
+        let mesh = Mesh::new(size.width, size.height);
         let window_handle = Arc::new(winit_window);
         self.handle = Some(Arc::clone(&window_handle));
-        let mut pipeline = Pipeline::initialize(Arc::clone(&window_handle));
+        let pipeline = Pipeline::initialize(Arc::clone(&window_handle));
 
         self.handle = Some(Arc::clone(&window_handle));
 
         let mut last_update_inst = std::time::Instant::now();
+        let camera = self.camera.unwrap_or_else(|| {
+            Camera::new().with_aspect(self.config.width as f32 / self.config.height as f32)
+        });
+        let mut scene = Scene {
+            pipeline,
+            mesh,
+            camera,
+        };
         event_loop.run(move |event, elwt| {
             if let Some(update_fn) = &mut self.on_update_fn {
                 let now = std::time::Instant::now();
@@ -124,22 +145,26 @@ impl Window {
                         WindowEvent::CloseRequested => (self.on_window_close_fn)(window_event, elwt),
                         WindowEvent::RedrawRequested => {
                             if let Some(handler) = &mut self.on_draw_requested_fn {
-                                handler(&mut vertex_batch);
+                                handler(&mut scene);
                             }
-                            pipeline.render(&vertex_batch);
+                            scene.pipeline.render(&scene.mesh, &scene.camera);
                         }
                         WindowEvent::Resized(new_size) => {
                             if new_size.width > 0 && new_size.height > 0 {
-                                pipeline.surface_config.width = new_size.width;
-                                pipeline.surface_config.height = new_size.height;
-                                pipeline.surface.configure(&pipeline.device, &pipeline.surface_config);
+                                scene.pipeline.surface_config.width = new_size.width;
+                                scene.pipeline.surface_config.height = new_size.height;
+                                scene.pipeline.surface.configure(
+                                    &scene.pipeline.device, &scene.pipeline.surface_config
+                                );
                             }
                         }
                         WindowEvent::ScaleFactorChanged { .. } => {
                             let new_size = window_handle.inner_size();
-                            pipeline.surface_config.width = new_size.width;
-                            pipeline.surface_config.height = new_size.height;
-                            pipeline.surface.configure(&pipeline.device, &pipeline.surface_config);
+                            scene.pipeline.surface_config.width = new_size.width;
+                            scene.pipeline.surface_config.height = new_size.height;
+                            scene.pipeline.surface.configure(
+                                &scene.pipeline.device, &scene.pipeline.surface_config
+                            );
                         }
                         _ => ()
                     }

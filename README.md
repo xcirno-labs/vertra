@@ -33,44 +33,71 @@ and render batched geometry.
 ```rust
 use std::rc::Rc;
 use std::cell::RefCell;
+use vertra::camera::Camera;
 use vertra::window::Window;
-use vertra::transform::Transform;
+use vertra::transform::{Transform};
 use vertra::geometry::Geometry;
 use vertra::timer::Timer;
 
 struct AppState {
-    timer: Timer,
-    square_transform: Transform,
-    rotation: f32,
+    visibility_timer: Timer,
+    triangle_pos: Transform,
+    square_pos: Transform,
+    show_triangle: bool,
 }
 
 fn main() {
+    // Initialize State with Timer
     let state = Rc::new(RefCell::new(AppState {
-        timer: Timer::new(2.0),
-        square_transform: Transform::from_position(0.0, 0.0, 0.0),
-        rotation: 0.0,
+        visibility_timer: Timer::new(2.0), // Wait 2 seconds
+        triangle_pos: Transform::from_position(-250.0, 0.0, 0.0),
+        square_pos: Transform::from_position(250.0, 0.0, 0.0),
+        show_triangle: true,
     }));
 
     let u_state = Rc::clone(&state);
     let d_state = Rc::clone(&state);
 
     Window::new()
-        .with_title("Vertra Example")
-        .with_dimensions(800, 600)
+        .with_title("Vertra with Timer")
+        // Set up the camera
+        .with_camera(Camera::new().with_fov(20.0))
         .on_update(move |dt| {
             let mut s = u_state.borrow_mut();
-            s.rotation += 45.0 * dt;
-            s.square_transform.rotation = s.rotation;
+
+            // Use Timer's update method
+            s.visibility_timer.update(dt);
+
+            // Rotate the square every frame
+            s.square_pos.rotation += 60.0 * dt;
+
+            // Change triangle visibility
+            if s.visibility_timer.is_finished() {
+                s.show_triangle = !s.show_triangle;
+                s.visibility_timer.reset(); // Reset for the next 2-second cycle
+            }
         })
-        .on_draw_request(move |batch| {
+        .on_draw_request(move |scene| {
             let s = d_state.borrow();
-            batch.clear();
-            
-            batch.add_geometry(
-                &Geometry::Rectangle { width: 0.5, height: 0.5 },
-                &s.square_transform,
-                [0.2, 0.6, 1.0, 1.0]
+
+            // Clear the buffer to draw fresh this frame
+            scene.mesh.clear();
+
+            // Draw Square
+            scene.mesh.add_geometry(
+                &Geometry::Rectangle { height: 100.0, width: 100.0 },
+                &s.square_pos,
+                [0.0, 0.8, 1.0, 1.0]
             );
+
+            // Draw Triangle only if toggle is true
+            if s.show_triangle {
+                scene.mesh.add_geometry(
+                    &Geometry::Triangle { base: 100.0, height: 100.0 },
+                    &s.triangle_pos,
+                    [1.0, 0.2, 0.5, 1.0]
+                );
+            }
         })
         .create();
 }

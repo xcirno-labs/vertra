@@ -1,5 +1,6 @@
 use crate::geometry::Geometry;
 use crate::transform::Transform;
+use crate::viewport::Viewport;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -11,13 +12,19 @@ pub struct Vertex {
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
+    pub viewport: Viewport,
 }
 
 impl Mesh {
-    pub fn new() -> Self {
+    pub fn new(viewport_width: u32, viewport_height: u32) -> Self {
+        let viewport = Viewport {
+            width: viewport_width,
+            height: viewport_height,
+        };
         Self {
             vertices: Vec::new(),
-            indices: Vec::new()
+            indices: Vec::new(),
+            viewport
         }
     }
 
@@ -29,7 +36,6 @@ impl Mesh {
                 );
             }
             Geometry::Rectangle { width, height } => {
-                // TODO: Implement coordinate system
                 let w = width * 0.5;
                 let h = height * 0.5;
 
@@ -54,11 +60,11 @@ impl Mesh {
         }
     }
     fn add_transformed_triangle(&mut self, points: [[f32; 3]; 3], transform: &Transform, color: [f32; 4]) {
-        let transformed = transform.apply(points);
+        let transformed = transform.apply(points, self.viewport);
         self.push_triangle([transformed[0], transformed[1], transformed[2]], color);
     }
     fn add_transformed_quad(&mut self, points: [[f32; 3]; 4], transform: &Transform, color: [f32; 4]) {
-        let transformed = transform.apply(points);
+        let transformed = transform.apply(points, self.viewport);
         self.push_quad([transformed[0], transformed[1], transformed[2], transformed[3]], color);
     }
 

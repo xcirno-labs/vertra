@@ -1,3 +1,5 @@
+use crate::viewport::Viewport;
+
 pub struct Transform {
     pub position: [f32; 3],
     pub rotation: f32,  // All rotation-related data are measured in degrees
@@ -22,7 +24,13 @@ impl Transform {
         }
     }
 
-    pub fn apply<const N: usize>(&self, points: [[f32; 3]; N]) -> [[f32; 3]; N] {
+    pub fn apply<const N: usize>(&self, points: [[f32; 3]; N], viewport: Viewport) -> [[f32; 3]; N] {
+        let aspect_ratio = viewport.aspect_ratio();
+
+        // We define our world units based on width (always -500 to +500).
+        // Height will scale based on aspect ratio to prevent stretching.
+        let virtual_width = 1000.0;
+        let virtual_height = virtual_width / aspect_ratio;
         let mut output = [[0.0; 3]; N];
 
         for i in 0..N {
@@ -37,11 +45,14 @@ impl Transform {
             let ry = x * sin_r + y * cos_r;
 
             // Translate
-            output[i] = [
-                rx + self.position[0],
-                ry + self.position[1],
-                points[i][2] + self.position[2],
-            ]
+            let rx = rx + self.position[0];
+            let ry = ry + self.position[1];
+            // Normalize coordinate from Coordinate System to NDC (-1.0 to 1.0).
+            // We scale by 0.5 since height and with has both negative and positive value.
+            let nx = rx / (virtual_width * 0.5);
+            let ny = ry / (virtual_height * 0.5);
+
+            output[i] = [nx, ny, points[i][2] + self.position[2]]
 
         }
         output

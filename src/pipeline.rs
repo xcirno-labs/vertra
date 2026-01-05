@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use wgpu::{Device, Queue, Surface};
-use crate::mesh::{Vertex, Mesh};
+use crate::camera::Camera;
+use crate::mesh::{Mesh, Vertex};
 
 const INITIAL_V_CAP: u32 = 128;
 const INITIAL_I_CAP: u32 = 1024;
@@ -8,6 +9,7 @@ const INITIAL_I_CAP: u32 = 1024;
 pub struct PipelineConfig {
     pub initial_vertex_buffer_size: usize,
 }
+
 pub struct Pipeline {
     pub render_pipeline: wgpu::RenderPipeline,
     pub shader: wgpu::ShaderModule,
@@ -17,6 +19,9 @@ pub struct Pipeline {
     pub surface_config: wgpu::SurfaceConfiguration,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    camera_buffer: wgpu::Buffer,
+    // Bridge linking buffer to shader
+    camera_bind_group: wgpu::BindGroup,
     current_vertex_limit: u32,
     current_index_limit: u32
 }
@@ -44,9 +49,46 @@ impl Pipeline {
         surface.configure(&device, &surface_config);
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
+        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Camera Uniform Buffer"),
+            size: size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Create a Bind Group (How the shader accesses this buffer)
+        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                // This is the @binding(0) in shader file
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: Some("camera_bind_group_layout"),
+        });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        });
+
+        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Render Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout],
+            push_constant_ranges: &[],
+        });
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
-            layout: None,
+            layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
@@ -104,21 +146,24 @@ impl Pipeline {
                 mapped_at_creation: false,
             }
         );
+
         Self {
-            render_pipeline: render_pipeline,
-            shader: shader,
-            device: device,
-            queue: queue,
-            surface: surface,
-            surface_config: surface_config,
-            vertex_buffer: vertex_buffer,
-            index_buffer: index_buffer,
+            render_pipeline,
+            shader,
+            device,
+            queue,
+            surface,
+            surface_config,
+            vertex_buffer,
+            index_buffer,
+            camera_buffer,
+            camera_bind_group,
             current_vertex_limit: 0,
-            current_index_limit: 0
+            current_index_limit: 0,
         }
     }
 
-    pub fn render(&mut self, mesh: &Mesh) -> &Self {
+    pub fn render(&mut self, mesh: &Mesh, camera: &Camera) -> &Self {
         let frame = self.surface.get_current_texture().unwrap();
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let vertex_count = mesh.vertices.len() as u32;
@@ -150,10 +195,14 @@ impl Pipeline {
             });
             self.current_index_limit = new_limit;
         }
+
+        let camera_matrix = camera.build_view_projection_matrix();
+
         // Create a command encoder (the "list of instructions" for the GPU)
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         self.queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&mesh.vertices));
         self.queue.write_buffer(&self.index_buffer, 0, bytemuck::cast_slice(&mesh.indices));
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_matrix.data]));
         {
             let mut _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -170,6 +219,7 @@ impl Pipeline {
             _render_pass.set_pipeline(&self.render_pipeline);
             _render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             _render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            _render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             // Draw all vertices with all indices (base_vertex is 0)
             _render_pass.draw_indexed(0..index_count, 0, 0..1);
         }
