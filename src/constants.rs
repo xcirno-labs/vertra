@@ -2,6 +2,8 @@ pub mod window {
     pub const MIN_DIMENSION: [u32; 2] = [250, 250];
     pub const DEFAULT_WIDTH: u32 = 800;
     pub const DEFAULT_HEIGHT: u32 = 600;
+    // 60 times every second
+    pub const FIXED_DELTA: f32 = 1.0 / 60.0;
 }
 
 pub mod camera {

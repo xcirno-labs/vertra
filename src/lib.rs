@@ -9,6 +9,7 @@ pub mod math;
 pub mod camera;
 pub mod scene;
 pub mod constants;
+pub mod world;
 
 #[cfg(test)]
 mod tests;

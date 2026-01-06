@@ -23,8 +23,7 @@ impl Transform {
             ..Default::default()
         }
     }
-
-    pub fn apply<const N: usize>(&self, points: [[f32; 3]; N]) -> [[f32; 3]; N] {
+    pub fn to_matrix(&self) -> Matrix4 {
         // Create Translation Matrix
         let mut translation = Matrix4::identity();
         translation.data[3][0] = self.position[0];
@@ -64,7 +63,10 @@ impl Transform {
         scale.data[2][2] = self.scale[2];
 
         // Combine them: Model = Translation * Rotation * Scale
-        let model_matrix = translation * rotation * scale;
+        translation * rotation * scale
+    }
+    pub fn apply<const N: usize>(&self, points: [[f32; 3]; N]) -> [[f32; 3]; N] {
+        let model_matrix = self.to_matrix();
 
         // Apply to all points
         let mut output = [[0.0; 3]; N];

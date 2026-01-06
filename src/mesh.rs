@@ -1,4 +1,5 @@
-use crate::geometry::Geometry;
+use crate::geometry::{Geometry, GeometryId};
+use crate::pipeline::Pipeline;
 use crate::transform::Transform;
 
 #[repr(C)]
@@ -8,17 +9,47 @@ pub struct Vertex {
     pub color: [f32; 3],
 }
 
-pub struct Mesh {
+// GPU Side: The actual buffers living in VRAM
+pub struct BakedMesh {
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+    pub index_count: u32,
+}
+
+// CPU Side: A "Builder" used to assemble vertices before baking
+pub struct MeshData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
 }
 
-impl Mesh {
+// The Collection: Stored in the Scene to keep track of all unique baked shapes
+pub struct MeshRegistry {
+    pub baked_geometries: Vec<BakedMesh>,
+}
+
+impl MeshRegistry {
+    pub fn new() -> Self {
+        Self { baked_geometries: Vec::new() }
+    }
+
+    pub fn add(&mut self, baked: BakedMesh) -> GeometryId {
+        let id = self.baked_geometries.len();
+        self.baked_geometries.push(baked);
+        GeometryId(id)
+    }
+}
+
+impl MeshData {
     pub fn new() -> Self {
         Self {
             vertices: Vec::new(),
             indices: Vec::new(),
         }
+    }
+
+    // Takes the current CPU data and uploads it to the GPU
+    pub fn bake(&self, pipeline: &Pipeline) -> BakedMesh {
+        pipeline.create_baked_mesh(&self.vertices, &self.indices)
     }
 
     pub fn add_geometry(&mut self, geometry: &Geometry, transform: &Transform, color: [f32; 4]) {
@@ -31,7 +62,7 @@ impl Mesh {
             Geometry::Rectangle { width, height } => {
                 let w = width * 0.5;
                 let h = height * 0.5;
-
+                
                 // Corners relative to center (0,0)
                 let p1 = [-w, -h, 0.0];  // Bottom Left
                 let p2 = [ w, -h, 0.0];  // Bottom Right
@@ -43,16 +74,15 @@ impl Mesh {
             Geometry::Triangle { base, height } => {
                 let half_w = base * 0.5;
                 let half_h = height * 0.5;
-
+                
                 let p1 = [0.0, half_h, 0.0];        // Top
                 let p2 = [-half_w, -half_h, 0.0];   // Bottom Left
                 let p3 = [half_w, -half_h, 0.0];    // Bottom Right
-
+                
                 self.add_transformed_triangle([p1, p2, p3], transform, color);
             }
             Geometry::Cube { size } => {
                 let s = size * 0.5;
-
                 let p1 = [-s, -s,  s]; // Front-Bottom-Left
                 let p2 = [ s, -s,  s]; // Front-Bottom-Right
                 let p3 = [ s,  s,  s]; // Front-Top-Right
@@ -72,13 +102,15 @@ impl Mesh {
             }
         }
     }
+
     fn add_transformed_triangle(&mut self, points: [[f32; 3]; 3], transform: &Transform, color: [f32; 4]) {
         let transformed = transform.apply(points);
-        self.push_triangle([transformed[0], transformed[1], transformed[2]], color);
+        self.push_triangle(transformed, color);
     }
+
     fn add_transformed_quad(&mut self, points: [[f32; 3]; 4], transform: &Transform, color: [f32; 4]) {
         let transformed = transform.apply(points);
-        self.push_quad([transformed[0], transformed[1], transformed[2], transformed[3]], color);
+        self.push_quad(transformed, color);
     }
 
     fn push_quad(&mut self, points: [[f32; 3]; 4], color: [f32; 4]) {
@@ -102,7 +134,7 @@ impl Mesh {
     fn push_triangle(&mut self, points: [[f32; 3]; 3], color: [f32; 4]) {
         let start_index = self.vertices.len() as u32;
         let c = [color[0], color[1], color[2]];
-
+        
         for p in points {
             self.vertices.push(Vertex { position: p, color: c });
         }
@@ -110,6 +142,7 @@ impl Mesh {
             start_index + 0, start_index + 1, start_index + 2
         ]);
     }
+
     pub fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();

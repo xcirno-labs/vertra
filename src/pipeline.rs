@@ -1,8 +1,10 @@
 use std::sync::Arc;
 use wgpu::{Device, Queue, Surface};
+use wgpu::util::DeviceExt;
 use crate::camera::Camera;
-use crate::mesh::{Mesh, Vertex};
-use crate::constants::pipeline;
+use crate::mesh::{BakedMesh, MeshRegistry, Vertex};
+use crate::world::World;
+
 pub struct PipelineConfig {
     pub initial_vertex_buffer_size: usize,
 }
@@ -14,13 +16,10 @@ pub struct Pipeline {
     pub queue: Queue,
     pub surface: Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
-    // Bridge linking buffer to shader
+    model_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    current_vertex_limit: u32,
-    current_index_limit: u32,
+    model_bind_group: wgpu::BindGroup,
     depth_view: wgpu::TextureView,
 }
 
@@ -78,10 +77,37 @@ impl Pipeline {
             }],
             label: Some("camera_bind_group"),
         });
+        let model_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Model Uniform Buffer"),
+            size: size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
+        let model_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: Some("model_bind_group_layout"),
+        });
+        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &model_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: model_buffer.as_entire_binding(),
+            }],
+            label: Some("model_bind_group"),
+        });
         let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[&camera_bind_group_layout],
+            bind_group_layouts: &[&camera_bind_group_layout, &model_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -153,25 +179,6 @@ impl Pipeline {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
-        let vertex_buffer = device.create_buffer(
-            &wgpu::BufferDescriptor {
-                label: Some("Initial Vertex Buffer"),
-                // We can initially put some smaller buffer size which can be auto-adjusted
-                //  when creating vertices.
-                size: (size_of::<Vertex>() as u32 * pipeline::INITIAL_VERTEX_LIMIT) as wgpu::BufferAddress,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }
-        );
-
-        let index_buffer = device.create_buffer(
-            &wgpu::BufferDescriptor {
-                label: Some("Initial Index Buffer"),
-                size: (size_of::<f32>() as u32 * pipeline::INITIAL_INDEX_LIMIT) as wgpu::BufferAddress,
-                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }
-        );
 
         Self {
             render_pipeline,
@@ -180,17 +187,15 @@ impl Pipeline {
             queue,
             surface,
             surface_config,
-            vertex_buffer,
-            index_buffer,
             camera_buffer,
             camera_bind_group,
+            model_bind_group,
             depth_view,
-            current_vertex_limit: 0,
-            current_index_limit: 0,
+            model_buffer,
         }
     }
 
-    pub fn render(&mut self, mesh: &Mesh, camera: &Camera) {
+    pub fn render_world(&mut self, world: &World, mesh_registry: &MeshRegistry, camera: &Camera) {
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Outdated) => {
@@ -203,45 +208,15 @@ impl Pipeline {
             }
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let vertex_count = mesh.vertices.len() as u32;
-        let index_count = mesh.indices.len() as u32;
 
-        if vertex_count > self.current_vertex_limit {
-            // Instead of recreating buffer on every frame, we can scale the current buffer by 1.5
-            let new_limit = (
-                self.current_vertex_limit + self.current_vertex_limit / 2
-            ).max(vertex_count);
-            self.vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("New Larger Vertex Buffer {}", new_limit)),
-                size: (size_of::<Vertex>() * vertex_count as usize) as wgpu::BufferAddress,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            self.current_vertex_limit = vertex_count;
-        }
-
-        if index_count > self.current_index_limit {
-            let new_limit = (
-                self.current_index_limit + self.current_index_limit / 2
-            ).max(index_count);
-            self.index_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("New Larger Vertex Buffer {}", new_limit)),
-                size: (size_of::<u32>() * new_limit as usize) as wgpu::BufferAddress,
-                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            self.current_index_limit = new_limit;
-        }
-
+        // Update Global Camera Uniform
         let camera_matrix = camera.build_view_projection_matrix();
-
-        // Create a command encoder (the "list of instructions" for the GPU)
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        self.queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&mesh.vertices));
-        self.queue.write_buffer(&self.index_buffer, 0, bytemuck::cast_slice(&mesh.indices));
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_matrix.data]));
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
         {
-            let mut _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -261,12 +236,28 @@ impl Pipeline {
                 ..Default::default()
             });
 
-            _render_pass.set_pipeline(&self.render_pipeline);
-            _render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            _render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            _render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            // Draw all vertices with all indices (base_vertex is 0)
-            _render_pass.draw_indexed(0..index_count, 0, 0..1);
+            rpass.set_pipeline(&self.render_pipeline);
+
+            // Bind Group 0: Camera (View/Projection)
+            rpass.set_bind_group(0, &self.camera_bind_group, &[]);
+
+            for entity in world.entities.values() {
+                // Find the GPU buffers in our Mesh registry using geometry_id
+                if let Some(baked) = mesh_registry.baked_geometries.get(entity.geometry_id.0) {
+                    let model_matrix = entity.transform.to_matrix();
+
+                    // We update a specialized buffer for the model matrix
+                    self.queue.write_buffer(&self.model_buffer, 0, bytemuck::cast_slice(&[model_matrix.data]));
+
+                    // Bind Group 1: Model Matrix (The Entity's Position/Rotation)
+                    rpass.set_bind_group(1, &self.model_bind_group, &[]);
+
+                    // Draw the baked geometry
+                    rpass.set_vertex_buffer(0, baked.vertex_buffer.slice(..));
+                    rpass.set_index_buffer(baked.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    rpass.draw_indexed(0..baked.index_count, 0, 0..1);
+                }
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -301,5 +292,25 @@ impl Pipeline {
             view_formats: &[],
         });
         depth_texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    pub fn create_baked_mesh(&self, vertices: &[Vertex], indices: &[u32]) -> BakedMesh {
+        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Baked Vertex Buffer"),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Baked Index Buffer"),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        BakedMesh {
+            vertex_buffer,
+            index_buffer,
+            index_count: indices.len() as u32,
+        }
     }
 }
