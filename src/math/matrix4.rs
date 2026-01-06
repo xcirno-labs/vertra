@@ -56,26 +56,32 @@ impl Matrix4 {
         // The 'Forward' vector (Forward = Target - Eye)
         let f = {
             let d = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
-            let len = (d[0]*d[0] + d[1]*d[1] + d[2]*d[2]).sqrt();
+            let len = (d[0]*d[0] + d[1]*d[1] + d[2]*d[2]).sqrt().max(0.0001);
             [d[0]/len, d[1]/len, d[2]/len]
         };
-
-        // The 'Right' vector (Right = Forward x Up)
+        // The 'Right' vector (Right = Up x Forward)
         let r = {
-            let d = [f[1]*up[2] - f[2]*up[1], f[2]*up[0] - f[0]*up[2], f[0]*up[1] - f[1]*up[0]];
-            let len = (d[0]*d[0] + d[1]*d[1] + d[2]*d[2]).sqrt();
+            let d = [
+                up[1]*f[2] - up[2]*f[1],
+                up[2]*f[0] - up[0]*f[2],
+                up[0]*f[1] - up[1]*f[0]
+            ];
+            let len = (d[0]*d[0] + d[1]*d[1] + d[2]*d[2]).sqrt().max(0.0001);
             [d[0]/len, d[1]/len, d[2]/len]
         };
 
-        // The 'Up' vector (Up = Right x Forward)
-        let u = [r[1]*f[2] - r[2]*f[1], r[2]*f[0] - r[0]*f[2], r[0]*f[1] - r[1]*f[0]];
-
+        // The 'Up' vector (Up = Forward x Right)
+        let u = [
+            f[1]*r[2] - f[2]*r[1],
+            f[2]*r[0] - f[0]*r[2],
+            f[0]*r[1] - f[1]*r[0]
+        ];
         let mut res = Self::identity();
 
         // Orientation part (Rows of the rotation part of the matrix)
-        res.data[0][0] = r[0]; res.data[1][0] = r[1]; res.data[2][0] = r[2];
-        res.data[0][1] = u[0]; res.data[1][1] = u[1]; res.data[2][1] = u[2];
-        res.data[0][2] = f[0]; res.data[1][2] = f[1]; res.data[2][2] = f[2];
+        res.data[0][0] = r[0]; res.data[0][1] = u[0]; res.data[0][2] = f[0];
+        res.data[1][0] = r[1]; res.data[1][1] = u[1]; res.data[1][2] = f[1];
+        res.data[2][0] = r[2]; res.data[2][1] = u[2]; res.data[2][2] = f[2];
 
         // Translation part (Camera position offset)
         res.data[3][0] = -(r[0]*eye[0] + r[1]*eye[1] + r[2]*eye[2]);

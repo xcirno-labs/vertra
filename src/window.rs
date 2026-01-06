@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::camera::Camera;
 use crate::mesh::Mesh;
 use crate::scene::Scene;
+use crate::constants::window;
 
 type UpdateCallback = Box<dyn FnMut(f32)>;
 type DrawCallback = Box<dyn FnMut(&mut Scene)>;
@@ -19,14 +20,16 @@ pub struct WindowConfig {
     pub title: String,
     pub height: u32,
     pub width: u32,
+    pub minimum_dimension: [u32; 2],
 }
 
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
             title: "untitled".into(),
-            width: 800,
-            height: 600,
+            width: window::DEFAULT_WIDTH,
+            height: window::DEFAULT_HEIGHT,
+            minimum_dimension: window::MIN_DIMENSION,
         }
     }
 }
@@ -40,6 +43,7 @@ pub struct Window {
     on_draw_requested_fn: Option<DrawCallback>,
     camera: Option<Camera>,
 }
+
 impl Window {
     pub fn new() -> Self {
         Self {
@@ -103,15 +107,16 @@ impl Window {
 
         let winit_window = WindowBuilder::new()
             .with_inner_size(PhysicalSize::new(self.config.width, self.config.height))
+            .with_min_inner_size(PhysicalSize::new(
+                self.config.minimum_dimension[0], self.config.minimum_dimension[1]
+            ))
             .with_title(self.config.title)
             .build(&event_loop)
             .unwrap();
 
-        let size = winit_window.inner_size();
 
-        let mesh = Mesh::new(size.width, size.height);
+        let mesh = Mesh::new();
         let window_handle = Arc::new(winit_window);
-        self.handle = Some(Arc::clone(&window_handle));
         let pipeline = Pipeline::initialize(Arc::clone(&window_handle));
 
         self.handle = Some(Arc::clone(&window_handle));
@@ -130,7 +135,6 @@ impl Window {
                 let now = std::time::Instant::now();
                 let dt = now.duration_since(last_update_inst).as_secs_f32();
                 last_update_inst = now;
-
                 update_fn(dt);
             }
 
@@ -150,21 +154,8 @@ impl Window {
                             scene.pipeline.render(&scene.mesh, &scene.camera);
                         }
                         WindowEvent::Resized(new_size) => {
-                            if new_size.width > 0 && new_size.height > 0 {
-                                scene.pipeline.surface_config.width = new_size.width;
-                                scene.pipeline.surface_config.height = new_size.height;
-                                scene.pipeline.surface.configure(
-                                    &scene.pipeline.device, &scene.pipeline.surface_config
-                                );
-                            }
-                        }
-                        WindowEvent::ScaleFactorChanged { .. } => {
-                            let new_size = window_handle.inner_size();
-                            scene.pipeline.surface_config.width = new_size.width;
-                            scene.pipeline.surface_config.height = new_size.height;
-                            scene.pipeline.surface.configure(
-                                &scene.pipeline.device, &scene.pipeline.surface_config
-                            );
+                            scene.pipeline.resize(new_size);
+                            scene.camera.aspect = new_size.width as f32 / new_size.height as f32;
                         }
                         _ => ()
                     }

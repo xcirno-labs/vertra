@@ -1,8 +1,8 @@
-use crate::viewport::Viewport;
+use crate::math::Matrix4;
 
 pub struct Transform {
     pub position: [f32; 3],
-    pub rotation: f32,  // All rotation-related data are measured in degrees
+    pub rotation: [f32; 3],  // All rotation-related data are measured in degrees
     pub scale: [f32; 3],
 }
 
@@ -10,7 +10,7 @@ impl Default for Transform {
     fn default() -> Self {
         Self {
             position: [0.0, 0.0, 0.0],
-            rotation: 0.0,
+            rotation: [0.0, 0.0, 0.0],
             scale: [1.0, 1.0, 1.0],
         }
     }
@@ -24,36 +24,57 @@ impl Transform {
         }
     }
 
-    pub fn apply<const N: usize>(&self, points: [[f32; 3]; N], viewport: Viewport) -> [[f32; 3]; N] {
-        let aspect_ratio = viewport.aspect_ratio();
+    pub fn apply<const N: usize>(&self, points: [[f32; 3]; N]) -> [[f32; 3]; N] {
+        // Create Translation Matrix
+        let mut translation = Matrix4::identity();
+        translation.data[3][0] = self.position[0];
+        translation.data[3][1] = self.position[1];
+        translation.data[3][2] = self.position[2];
 
-        // We define our world units based on width (always -500 to +500).
-        // Height will scale based on aspect ratio to prevent stretching.
-        let virtual_width = 1000.0;
-        let virtual_height = virtual_width / aspect_ratio;
+        let rx = self.rotation[0].to_radians();
+        let ry = self.rotation[1].to_radians();
+        let rz = self.rotation[2].to_radians();
+
+        // Create Rotation Matrices
+        // Reference: https://en.wikipedia.org/wiki/Rotation_matrix
+        let mut rot_x = Matrix4::identity();
+        let (sx, cx) = rx.sin_cos();
+        rot_x.data[1][1] = cx;
+        rot_x.data[1][2] = sx;
+        rot_x.data[2][1] = -sx;
+        rot_x.data[2][2] = cx;
+
+        let mut rot_y = Matrix4::identity();
+        let (sy, cy) = ry.sin_cos();
+        rot_y.data[0][0] = cy;  rot_y.data[0][2] = -sy;
+        rot_y.data[2][0] = sy;  rot_y.data[2][2] = cy;
+
+        let mut rot_z = Matrix4::identity();
+        let (sz, cz) = rz.sin_cos();
+        rot_z.data[0][0] = cz;  rot_z.data[0][1] = sz;
+        rot_z.data[1][0] = -sz; rot_z.data[1][1] = cz;
+
+        // Combine Rotations
+        let rotation = rot_y * rot_x * rot_z;
+
+        // Create Scale Matrix
+        let mut scale = Matrix4::identity();
+        scale.data[0][0] = self.scale[0];
+        scale.data[1][1] = self.scale[1];
+        scale.data[2][2] = self.scale[2];
+
+        // Combine them: Model = Translation * Rotation * Scale
+        let model_matrix = translation * rotation * scale;
+
+        // Apply to all points
         let mut output = [[0.0; 3]; N];
-
         for i in 0..N {
-            // Scale
-            let x = points[i][0] * self.scale[0];
-            let y = points[i][1] * self.scale[1];
+            // Convert [f32; 3] to [f32; 4] for the matrix math
+            let v4 = [points[i][0], points[i][1], points[i][2], 1.0];
+            let transformed = model_matrix.mul_vec4(v4);
 
-            // Rotate
-            let rad = self.rotation.to_radians();
-            let (sin_r, cos_r) = rad.sin_cos();
-            let rx = x * cos_r - y * sin_r;
-            let ry = x * sin_r + y * cos_r;
-
-            // Translate
-            let rx = rx + self.position[0];
-            let ry = ry + self.position[1];
-            // Normalize coordinate from Coordinate System to NDC (-1.0 to 1.0).
-            // We scale by 0.5 since height and with has both negative and positive value.
-            let nx = rx / (virtual_width * 0.5);
-            let ny = ry / (virtual_height * 0.5);
-
-            output[i] = [nx, ny, points[i][2] + self.position[2]]
-
+            // Drop the w component to return to [f32; 3]
+            output[i] = [transformed[0], transformed[1], transformed[2]];
         }
         output
     }

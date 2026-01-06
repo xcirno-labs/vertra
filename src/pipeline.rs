@@ -2,10 +2,7 @@ use std::sync::Arc;
 use wgpu::{Device, Queue, Surface};
 use crate::camera::Camera;
 use crate::mesh::{Mesh, Vertex};
-
-const INITIAL_V_CAP: u32 = 128;
-const INITIAL_I_CAP: u32 = 1024;
-
+use crate::constants::pipeline;
 pub struct PipelineConfig {
     pub initial_vertex_buffer_size: usize,
 }
@@ -23,7 +20,8 @@ pub struct Pipeline {
     // Bridge linking buffer to shader
     camera_bind_group: wgpu::BindGroup,
     current_vertex_limit: u32,
-    current_index_limit: u32
+    current_index_limit: u32,
+    depth_view: wgpu::TextureView,
 }
 
 impl Pipeline {
@@ -86,6 +84,24 @@ impl Pipeline {
             bind_group_layouts: &[&camera_bind_group_layout],
             push_constant_ranges: &[],
         });
+
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Depth Texture"),
+            size: wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&render_pipeline_layout),
@@ -122,8 +138,18 @@ impl Pipeline {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None, // No depth for 2D
+            primitive: wgpu::PrimitiveState {
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                // "Less" means: Draw the new pixel only if its distance is LESS than the existing one
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -132,7 +158,7 @@ impl Pipeline {
                 label: Some("Initial Vertex Buffer"),
                 // We can initially put some smaller buffer size which can be auto-adjusted
                 //  when creating vertices.
-                size: (size_of::<Vertex>() as u32 * INITIAL_V_CAP) as wgpu::BufferAddress,
+                size: (size_of::<Vertex>() as u32 * pipeline::INITIAL_VERTEX_LIMIT) as wgpu::BufferAddress,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }
@@ -141,7 +167,7 @@ impl Pipeline {
         let index_buffer = device.create_buffer(
             &wgpu::BufferDescriptor {
                 label: Some("Initial Index Buffer"),
-                size: (size_of::<f32>() as u32 * INITIAL_I_CAP) as wgpu::BufferAddress,
+                size: (size_of::<f32>() as u32 * pipeline::INITIAL_INDEX_LIMIT) as wgpu::BufferAddress,
                 usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }
@@ -158,13 +184,24 @@ impl Pipeline {
             index_buffer,
             camera_buffer,
             camera_bind_group,
+            depth_view,
             current_vertex_limit: 0,
             current_index_limit: 0,
         }
     }
 
-    pub fn render(&mut self, mesh: &Mesh, camera: &Camera) -> &Self {
-        let frame = self.surface.get_current_texture().unwrap();
+    pub fn render(&mut self, mesh: &Mesh, camera: &Camera) {
+        let frame = match self.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Outdated) => {
+                self.surface.configure(&self.device, &self.surface_config);
+                return;
+            }
+            Err(e) => {
+                eprintln!("Dropped frame due to error: {:?}", e);
+                return;
+            }
+        };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let vertex_count = mesh.vertices.len() as u32;
         let index_count = mesh.indices.len() as u32;
@@ -213,6 +250,14 @@ impl Pipeline {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 ..Default::default()
             });
 
@@ -226,6 +271,35 @@ impl Pipeline {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
-        self
+    }
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            // Update surface configuration
+            self.surface_config.width = new_size.width;
+            self.surface_config.height = new_size.height;
+            self.surface.configure(&self.device, &self.surface_config);
+
+            // Update the view and the camera aspect ratio
+            self.depth_view = self.create_depth_view(new_size);
+        }
+    }
+
+    fn create_depth_view(&self, size: winit::dpi::PhysicalSize<u32>) -> wgpu::TextureView {
+        // Recreate the Depth Texture with the given size
+        let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Depth Texture"),
+            size: wgpu::Extent3d {
+                width: size.width,
+                height: size.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        depth_texture.create_view(&wgpu::TextureViewDescriptor::default())
     }
 }

@@ -1,6 +1,5 @@
 use crate::geometry::Geometry;
 use crate::transform::Transform;
-use crate::viewport::Viewport;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -12,19 +11,13 @@ pub struct Vertex {
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
-    pub viewport: Viewport,
 }
 
 impl Mesh {
-    pub fn new(viewport_width: u32, viewport_height: u32) -> Self {
-        let viewport = Viewport {
-            width: viewport_width,
-            height: viewport_height,
-        };
+    pub fn new() -> Self {
         Self {
             vertices: Vec::new(),
             indices: Vec::new(),
-            viewport
         }
     }
 
@@ -57,14 +50,34 @@ impl Mesh {
 
                 self.add_transformed_triangle([p1, p2, p3], transform, color);
             }
+            Geometry::Cube { size } => {
+                let s = size * 0.5;
+
+                let p1 = [-s, -s,  s]; // Front-Bottom-Left
+                let p2 = [ s, -s,  s]; // Front-Bottom-Right
+                let p3 = [ s,  s,  s]; // Front-Top-Right
+                let p4 = [-s,  s,  s]; // Front-Top-Left
+                let p5 = [-s, -s, -s]; // Back-Bottom-Left
+                let p6 = [ s, -s, -s]; // Back-Bottom-Right
+                let p7 = [ s,  s, -s]; // Back-Top-Right
+                let p8 = [-s,  s, -s]; // Back-Top-Left
+
+                // Note: Winding order matters for culling!
+                self.add_transformed_quad([p1, p2, p3, p4], transform, color); // Front
+                self.add_transformed_quad([p6, p5, p8, p7], transform, color); // Back
+                self.add_transformed_quad([p5, p1, p4, p8], transform, color); // Left
+                self.add_transformed_quad([p2, p6, p7, p3], transform, color); // Right
+                self.add_transformed_quad([p4, p3, p7, p8], transform, color); // Top
+                self.add_transformed_quad([p5, p6, p2, p1], transform, color); // Bottom
+            }
         }
     }
     fn add_transformed_triangle(&mut self, points: [[f32; 3]; 3], transform: &Transform, color: [f32; 4]) {
-        let transformed = transform.apply(points, self.viewport);
+        let transformed = transform.apply(points);
         self.push_triangle([transformed[0], transformed[1], transformed[2]], color);
     }
     fn add_transformed_quad(&mut self, points: [[f32; 3]; 4], transform: &Transform, color: [f32; 4]) {
-        let transformed = transform.apply(points, self.viewport);
+        let transformed = transform.apply(points);
         self.push_quad([transformed[0], transformed[1], transformed[2], transformed[3]], color);
     }
 
