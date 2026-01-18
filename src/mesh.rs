@@ -54,43 +54,26 @@ impl MeshData {
 
     pub fn add_geometry(&mut self, geometry: &Geometry, transform: &Transform, color: [f32; 4]) {
         match geometry {
-            Geometry::Square { size } => {
+            Geometry::Cube { size } => {
+                let s = *size * 0.5;
                 self.add_geometry(
-                    &Geometry::Rectangle { width: *size, height: *size }, transform, color
+                    &Geometry::Box { width: s, height: s, depth: s }, transform, color
                 );
+
             }
-            Geometry::Rectangle { width, height } => {
+            Geometry::Box { width, height, depth } => {
                 let w = width * 0.5;
                 let h = height * 0.5;
-                
-                // Corners relative to center (0,0)
-                let p1 = [-w, -h, 0.0];  // Bottom Left
-                let p2 = [ w, -h, 0.0];  // Bottom Right
-                let p3 = [ w,  h, 0.0];  // Top Right
-                let p4 = [-w,  h, 0.0];  // Top Left
+                let d = depth * 0.5;
 
-                self.add_transformed_quad([p1, p2, p3, p4], transform, color);
-            }
-            Geometry::Triangle { base, height } => {
-                let half_w = base * 0.5;
-                let half_h = height * 0.5;
-                
-                let p1 = [0.0, half_h, 0.0];        // Top
-                let p2 = [-half_w, -half_h, 0.0];   // Bottom Left
-                let p3 = [half_w, -half_h, 0.0];    // Bottom Right
-                
-                self.add_transformed_triangle([p1, p2, p3], transform, color);
-            }
-            Geometry::Cube { size } => {
-                let s = size * 0.5;
-                let p1 = [-s, -s,  s]; // Front-Bottom-Left
-                let p2 = [ s, -s,  s]; // Front-Bottom-Right
-                let p3 = [ s,  s,  s]; // Front-Top-Right
-                let p4 = [-s,  s,  s]; // Front-Top-Left
-                let p5 = [-s, -s, -s]; // Back-Bottom-Left
-                let p6 = [ s, -s, -s]; // Back-Bottom-Right
-                let p7 = [ s,  s, -s]; // Back-Top-Right
-                let p8 = [-s,  s, -s]; // Back-Top-Left
+                let p1 = [-w, -h,  d]; // Front-Bottom-Left
+                let p2 = [ w, -h,  d]; // Front-Bottom-Right
+                let p3 = [ w,  h,  d]; // Front-Top-Right
+                let p4 = [-w,  h,  d]; // Front-Top-Left
+                let p5 = [-w, -h, -d]; // Back-Bottom-Left
+                let p6 = [ w, -h, -d]; // Back-Bottom-Right
+                let p7 = [ w,  h, -d]; // Back-Top-Right
+                let p8 = [-w,  h, -d]; // Back-Top-Left
 
                 // Note: Winding order matters for culling!
                 self.add_transformed_quad([p1, p2, p3, p4], transform, color); // Front
@@ -99,6 +82,104 @@ impl MeshData {
                 self.add_transformed_quad([p2, p6, p7, p3], transform, color); // Right
                 self.add_transformed_quad([p4, p3, p7, p8], transform, color); // Top
                 self.add_transformed_quad([p5, p6, p2, p1], transform, color); // Bottom
+            }
+            Geometry::Plane { size } => {
+                let s = size * 0.5;
+
+                // Since using culling makes the back of the geometry not visible,
+                // we can instead make 2 copies of switched vertices.
+                let p1 = [-s, 0.0,  s];
+                let p2 = [ s, 0.0,  s];
+                let p3 = [ s, 0.0, -s];
+                let p4 = [-s, 0.0, -s];
+
+                // Push the top face
+                self.add_transformed_quad([p1, p2, p3, p4], transform, color);
+
+                // Push the bottom face (reversed order)
+                self.add_transformed_quad([p4, p3, p2, p1], transform, color);
+            }
+            Geometry::Pyramid { base_size, height } => {
+                let s = base_size * 0.5;
+                let h = height * 0.5;
+
+                let tip = [0.0, h, 0.0];
+                let b1 = [-s, -h, s]; // Front-Left
+                let b2 = [s, -h, s]; // Front-Right
+                let b3 = [s, -h, -s]; // Back-Right
+                let b4 = [-s, -h, -s]; // Back-Left
+
+                // 4 Sides
+                self.add_transformed_triangle([tip, b1, b2], transform, color); // Front
+                self.add_transformed_triangle([tip, b2, b3], transform, color); // Right
+                self.add_transformed_triangle([tip, b3, b4], transform, color); // Back
+                self.add_transformed_triangle([tip, b4, b1], transform, color); // Left
+                // Base
+                self.add_transformed_quad([b4, b3, b2, b1], transform, color);
+            }
+            Geometry::Capsule { radius, height, subdivisions } => {
+                let r = *radius;
+                let h = *height;
+                let subs = *subdivisions as f32;
+                let half_h = h * 0.5;
+                // `lat_subs` is the number of vertical vertices. To maintain a "rounded" shape,
+                // a minimum of 4 subdivisions is used.
+                let lat_subs = (*subdivisions / 2).max(4);
+
+                // `subdivisions` is the number of horizontal vertices
+                for i in 0..*subdivisions {
+                    let t1 = (i as f32 * 2.0 * std::f32::consts::PI) / subs;
+                    let t2 = ((i + 1) as f32 * 2.0 * std::f32::consts::PI) / subs;
+
+                    let x1 = t1.cos();
+                    let z1 = t1.sin();
+                    let x2 = t2.cos();
+                    let z2 = t2.sin();
+
+                    // The body (Cylinder)
+                    self.add_transformed_quad(
+                        [
+                            [x1 * r, -half_h, z1 * r],
+                            [x2 * r, -half_h, z2 * r],
+                            [x2 * r,  half_h, z2 * r],
+                            [x1 * r,  half_h, z1 * r],
+                        ],
+                        transform, color
+                    );
+
+                    // The 2 hemispheres
+                    for j in 0..lat_subs {
+                        let phi1 = (j as f32 * std::f32::consts::FRAC_PI_2) / lat_subs as f32;
+                        let phi2 = ((j + 1) as f32 * std::f32::consts::FRAC_PI_2) / lat_subs as f32;
+
+                        let r1 = phi1.cos() * r; let y1 = phi1.sin() * r;
+                        let r2 = phi2.cos() * r; let y2 = phi2.sin() * r;
+
+                        // TOP CAP (Facing Outwards/Up)
+                        self.add_transformed_quad(
+                            [
+                                [x1 * r1,  half_h + y1, z1 * r1],
+                                [x2 * r1,  half_h + y1, z2 * r1],
+                                [x2 * r2,  half_h + y2, z2 * r2],
+                                [x1 * r2,  half_h + y2, z1 * r2],
+                            ],
+                            transform, color
+                        );
+
+                        // BOTTOM CAP (Facing Outwards/Down)
+                        // To ensure the "base" renders, we reverse the sequence of x1 and x2
+                        // so the normal faces DOWN.
+                        self.add_transformed_quad(
+                            [
+                                [x1 * r1, -half_h - y1, z1 * r1],
+                                [x1 * r2, -half_h - y2, z1 * r2],
+                                [x2 * r2, -half_h - y2, z2 * r2],
+                                [x2 * r1, -half_h - y1, z2 * r1],
+                            ],
+                            transform, color
+                        );
+                    }
+                }
             }
         }
     }

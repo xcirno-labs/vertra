@@ -329,8 +329,6 @@ impl Pipeline {
         // Grow the buffer (2x growth or exactly what's needed)
         let new_size = required_size.max(self.model_buffer.size() * 2);
 
-        println!("Resizing model buffer to {} bytes", new_size);
-
         let new_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Dynamic Model Buffer"),
             size: new_size,

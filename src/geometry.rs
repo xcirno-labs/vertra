@@ -5,10 +5,11 @@ use crate::transform::Transform;
 pub struct GeometryId(pub usize);
 
 pub enum Geometry {
-    Triangle { base: f32, height: f32 },
-    Rectangle { width: f32, height: f32 },
-    Square { size: f32 },
     Cube { size: f32 },
+    Box { width: f32, height: f32, depth: f32 },
+    Plane { size: f32 },
+    Pyramid { base_size: f32, height: f32 },
+    Capsule { radius: f32, height: f32, subdivisions: usize },
     // TODO: add a custom mesh variant
     // Custom { vertices: Vec<Vertex> }
 }
