@@ -1,42 +1,64 @@
 use std::collections::HashMap;
-use crate::transform::Transform;
-use crate::geometry::GeometryId;
-
-pub struct Entity {
-    pub geometry_id: GeometryId,
-    pub transform: Transform,
-    pub color: [f32; 4],
-}
+use crate::objects::Object;
 
 pub struct World {
-    pub entities: HashMap<usize, Entity>,
-    next_entity_id: usize,
+    pub objects: HashMap<usize, Object>,
+    pub roots: Vec<usize>,
+    next_id: usize,
 }
 
 impl World {
     pub fn new() -> Self {
         Self {
-            entities: HashMap::new(),
-            next_entity_id: 0,
+            objects: HashMap::new(),
+            roots: Vec::new(),
+            next_id: 0,
         }
     }
 
-    pub fn spawn(&mut self, geometry_id: GeometryId, transform: Transform, color: [f32; 4]) -> usize {
-        let id = self.next_entity_id;
-        self.entities.insert(id, Entity {
-            geometry_id,
-            transform,
-            color,
-        });
-        self.next_entity_id += 1;
+    pub fn spawn_object(&mut self, mut object: Object, parent_id: Option<usize>) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        object.parent = parent_id;
+
+        // If it has a parent, link the child to the parent
+        if let Some(p_id) = parent_id {
+            if let Some(parent_obj) = self.objects.get_mut(&p_id) {
+                parent_obj.children.push(id);
+            }
+        } else {
+            // If no parent, it's a root object
+            self.roots.push(id);
+        }
+
+        self.objects.insert(id, object);
         id
     }
 
-    pub fn despawn(&mut self, entity_id: usize) {
-        self.entities.remove(&entity_id);
+    pub fn get_mut(&mut self, id: usize) -> Option<&mut Object> {
+        self.objects.get_mut(&id)
     }
 
-    pub fn get_entity_mut(&mut self, entity_id: usize) -> Option<&mut Entity> {
-        self.entities.get_mut(&entity_id)
+    fn recursive_remove(&mut self, id: usize) {
+        // Remove the object and take ownership of its children list
+        if let Some(obj) = self.objects.remove(&id) {
+            for child_id in obj.children {
+                self.recursive_remove(child_id);
+            }
+        }
+    }
+
+    pub fn delete(&mut self, id: usize) {
+        if let Some(obj) = self.objects.remove(&id) {
+            if let Some(p_id) = obj.parent {
+                if let Some(parent) = self.objects.get_mut(&p_id) {
+                    parent.children.retain(|&child_id| child_id != id);
+                }
+            } else {
+                self.roots.retain(|&root_id| root_id != id);
+            }
+        }
+        self.recursive_remove(id);
     }
 }

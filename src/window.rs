@@ -12,9 +12,11 @@ use crate::scene::Scene;
 use crate::constants::window;
 use crate::world::World;
 
+pub struct FrameContext {
+    pub dt: f32,
+}
 
-type UpdateCallback<S> = Box<dyn FnMut(&mut S, f32, &mut Scene)>;
-type DrawCallback<S> = Box<dyn FnMut(&mut S, &mut Scene)>;
+type DrawCallback<S> = Box<dyn FnMut(&mut S, &mut Scene, &mut FrameContext)>;
 type EventCallback<S> = Box<dyn FnMut(&mut S, &mut Scene, Event<()>, &EventLoopWindowTarget<()>)>;
 type CloseCallback<S> = Box<dyn FnMut(&mut S, WindowEvent, &EventLoopWindowTarget<()>)>;
 
@@ -42,7 +44,7 @@ pub struct Window<S> {
     config: WindowConfig,
     event_handler: Option<EventCallback<S>>,
     on_window_close_fn: CloseCallback<S>,
-    on_update_fn: Option<UpdateCallback<S>>,
+    on_update_fn: Option<DrawCallback<S>>,
     on_draw_requested_fn: Option<DrawCallback<S>>,
     on_startup_fn: Option<DrawCallback<S>>,
     on_fixed_update_fn: Option<DrawCallback<S>>,
@@ -94,13 +96,13 @@ impl<S> Window<S> {
     }
 
     pub fn on_update<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut S, f32, &mut Scene) + 'static {
+    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
         self.on_update_fn = Some(Box::new(function));
         self
     }
 
     pub fn on_draw_request<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut S, &mut Scene) + 'static {
+    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
         self.on_draw_requested_fn = Some(Box::new(function));
         self
     }
@@ -112,13 +114,13 @@ impl<S> Window<S> {
     }
 
     pub fn on_startup<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut S, &mut Scene) + 'static {
+    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
         self.on_startup_fn = Some(Box::new(function));
         self
     }
 
     pub fn on_fixed_update<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut S, &mut Scene) + 'static {
+    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
         self.on_fixed_update_fn = Some(Box::new(function));
         self
     }
@@ -153,7 +155,7 @@ impl<S> Window<S> {
             world: World::new(),
         };
         if let Some(startup_fn) = &mut self.on_startup_fn {
-            startup_fn(&mut self.state, &mut scene);
+            startup_fn(&mut self.state, &mut scene, &mut FrameContext {dt: 0.0});
         }
         let mut accumulator = 0.0;
 
@@ -163,7 +165,7 @@ impl<S> Window<S> {
             last_update_inst = now;
 
             if let Some(update_fn) = &mut self.on_update_fn {
-                update_fn(&mut self.state, dt, &mut scene);
+                update_fn(&mut self.state, &mut scene, &mut FrameContext { dt } );
             }
 
             // Handle all events (including AboutToWait)
@@ -175,7 +177,7 @@ impl<S> Window<S> {
                     accumulator += dt;
                     while accumulator >= window::FIXED_DELTA {
                         if let Some(fixed_update) = &mut self.on_fixed_update_fn {
-                            fixed_update(&mut self.state, &mut scene);
+                            fixed_update(&mut self.state, &mut scene, &mut FrameContext {dt: window::FIXED_DELTA});
                         }
                         accumulator -= window::FIXED_DELTA;
                     }
@@ -187,7 +189,7 @@ impl<S> Window<S> {
                         WindowEvent::CloseRequested => (self.on_window_close_fn)(&mut self.state, window_event, elwt),
                         WindowEvent::RedrawRequested => {
                             if let Some(handler) = &mut self.on_draw_requested_fn {
-                                handler(&mut self.state, &mut scene);
+                                handler(&mut self.state, &mut scene, &mut FrameContext { dt });
                             }
                             scene.draw_world();
                         }

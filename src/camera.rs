@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use winit::keyboard::KeyCode;
 use crate::math::Matrix4;
 use crate::constants::camera;
+use crate::window::FrameContext;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Camera {
@@ -151,9 +152,8 @@ impl Camera {
         self.target[2] += dz;
     }
 
-    pub fn handle_default_input(&mut self, keys: &HashSet<KeyCode>) {
+    pub fn handle_default_input(&mut self, keys: &HashSet<KeyCode>, speed: f32, ctx: &mut FrameContext) {
         let (f, r) = self.get_directions();
-        let speed = 0.3;
         let mut move_dir = [0.0, 0.0, 0.0];
 
         if keys.contains(&KeyCode::KeyW) {
@@ -169,6 +169,6 @@ impl Camera {
             move_dir[0] -= r[0]; move_dir[1] -= r[1]; move_dir[2] -= r[2];
         }
 
-        self.move_by(move_dir, speed);
+        self.move_by(move_dir, speed * ctx.dt);
     }
 }

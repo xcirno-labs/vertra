@@ -23,6 +23,7 @@ impl Transform {
             ..Default::default()
         }
     }
+    
     pub fn to_matrix(&self) -> Matrix4 {
         // Create Translation Matrix
         let mut translation = Matrix4::identity();
@@ -65,6 +66,7 @@ impl Transform {
         // Combine them: Model = Translation * Rotation * Scale
         translation * rotation * scale
     }
+    
     pub fn apply<const N: usize>(&self, points: [[f32; 3]; N]) -> [[f32; 3]; N] {
         let model_matrix = self.to_matrix();
 
@@ -79,5 +81,29 @@ impl Transform {
             output[i] = [transformed[0], transformed[1], transformed[2]];
         }
         output
+    }
+    
+    pub fn combine(&self, child: &Transform) -> Self {
+        let parent_m = self.to_matrix();
+        let child_m = child.to_matrix();
+        let combined_m = parent_m * child_m;
+
+        let mut t = Transform::default();
+        t.position = [
+            combined_m.data[3][0],
+            combined_m.data[3][1],
+            combined_m.data[3][2],
+        ];
+        t.rotation = [
+            self.rotation[0] + child.rotation[0],
+            self.rotation[1] + child.rotation[1],
+            self.rotation[2] + child.rotation[2],
+        ];
+        t.scale = [
+            self.scale[0] * child.scale[0],
+            self.scale[1] * child.scale[1],
+            self.scale[2] * child.scale[2],
+        ];
+        t
     }
 }

@@ -2,8 +2,7 @@ use std::sync::Arc;
 use wgpu::{Device, Queue, Surface};
 use wgpu::util::DeviceExt;
 use crate::camera::Camera;
-use crate::mesh::{BakedMesh, MeshRegistry, Vertex};
-use crate::world::World;
+use crate::mesh::{BakedMesh, Vertex};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -24,12 +23,8 @@ pub struct Pipeline {
     pub surface: Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
     camera_buffer: wgpu::Buffer,
-    model_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    model_bind_group: wgpu::BindGroup,
-    model_bind_group_layout: wgpu::BindGroupLayout,
     depth_view: wgpu::TextureView,
-    dynamic_alignment: u32,
 }
 
 impl Pipeline {
@@ -87,41 +82,9 @@ impl Pipeline {
             label: Some("camera_bind_group"),
         });
 
-        let model_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Model Uniform Buffer"),
-            size: size_of::<ModelUniform>() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let model_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-            label: Some("model_bind_group_layout"),
-        });
-        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &model_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &model_buffer,
-                    offset: 0,
-                    size: wgpu::BufferSize::new(size_of::<ModelUniform>() as u64),
-                }),
-            }],
-            label: Some("model_bind_group"),
-        });
         let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[&camera_bind_group_layout, &model_bind_group_layout],
+            bind_group_layouts: &[&camera_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -194,10 +157,6 @@ impl Pipeline {
             multiview: None,
         });
 
-        let alignment = device.limits().min_uniform_buffer_offset_alignment;
-        let uniform_size = size_of::<ModelUniform>() as u32;
-        let dynamic_alignment = (uniform_size + alignment - 1) & !(alignment - 1);
-
         Self {
             render_pipeline,
             shader,
@@ -207,17 +166,11 @@ impl Pipeline {
             surface_config,
             camera_buffer,
             camera_bind_group,
-            model_bind_group,
-            model_bind_group_layout,
             depth_view,
-            model_buffer,
-            dynamic_alignment,
         }
     }
 
-    pub fn render_world(&mut self, world: &World, mesh_registry: &MeshRegistry, camera: &Camera) {
-        let entity_count = world.entities.len() as u32;
-        self.ensure_model_buffer_capacity((entity_count * self.dynamic_alignment) as u64);
+    pub fn render_baked_mesh(&mut self, mesh: &BakedMesh, camera: &Camera) {
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Outdated) => {
@@ -260,36 +213,22 @@ impl Pipeline {
 
             rpass.set_pipeline(&self.render_pipeline);
 
-            // Bind Group 0: Camera (View/Projection)
+            // We only need Bind Group 0 (Camera).
+            // All position/color data is already "baked" into the vertex buffer.
             rpass.set_bind_group(0, &self.camera_bind_group, &[]);
 
-            // Find the GPU buffers in our Mesh registry using geometry_id
-            for (i, entity) in world.entities.values().enumerate() {
-                if let Some(baked) = mesh_registry.baked_geometries.get(entity.geometry_id.0) {
-                    let model_matrix = entity.transform.to_matrix();
-                    let uniform_data = ModelUniform {
-                        model: model_matrix.data,
-                        color: entity.color,
-                    };
-                    let offset = (i as u32 * self.dynamic_alignment) as u64;
+            rpass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            rpass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
-                    // We update a specialized buffer for the model matrix
-                    self.queue.write_buffer(&self.model_buffer, offset, bytemuck::cast_slice(&[uniform_data]));
-
-                    // Bind Group 1: Model Matrix (The Entity's Position/Rotation)
-                    rpass.set_bind_group(1, &self.model_bind_group, &[offset as u32]);
-
-                    // Draw the baked geometry
-                    rpass.set_vertex_buffer(0, baked.vertex_buffer.slice(..));
-                    rpass.set_index_buffer(baked.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    rpass.draw_indexed(0..baked.index_count, 0, 0..1);
-                }
-            }
+            // DRAW CALL: This draws the entire world in one shot
+            // (might change in the future)
+            rpass.draw_indexed(0..mesh.index_count, 0, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
     }
+
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             // Update surface configuration
@@ -319,38 +258,6 @@ impl Pipeline {
             view_formats: &[],
         });
         depth_texture.create_view(&wgpu::TextureViewDescriptor::default())
-    }
-
-    fn ensure_model_buffer_capacity(&mut self, required_size: u64) {
-        if self.model_buffer.size() >= required_size {
-            return;
-        }
-
-        // Grow the buffer (2x growth or exactly what's needed)
-        let new_size = required_size.max(self.model_buffer.size() * 2);
-
-        let new_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Dynamic Model Buffer"),
-            size: new_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Since the buffer handle changed, the Bind Group MUST be recreated
-        self.model_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.model_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &new_buffer,
-                    offset: 0,
-                    size: wgpu::BufferSize::new(size_of::<ModelUniform>() as u64),
-                }),
-            }],
-            label: Some("Model Bind Group"),
-        });
-
-        self.model_buffer = new_buffer;
     }
 
     pub fn create_baked_mesh(&self, vertices: &[Vertex], indices: &[u32]) -> BakedMesh {

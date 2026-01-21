@@ -2,7 +2,7 @@ use crate::camera::Camera;
 use crate::mesh::{MeshRegistry};
 use crate::pipeline::Pipeline;
 use crate::world::World;
-use crate::geometry::{Geometry, GeometryId};
+use crate::objects::Object;
 use crate::transform::Transform;
 
 pub struct Scene {
@@ -13,28 +13,24 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn _register(&mut self, geometry: &Geometry) -> GeometryId {
-        // Convert Geometry (Blueprint) to raw Vertex/Index data
-        let (verts, indices) = geometry.build();
-
-        // Upload that raw data to the GPU and get the Buffer handles
-        let baked = self.pipeline.create_baked_mesh(&verts, &indices);
-
-        // Store the BakedMesh in our internal list and return the ID
-        self.mesh_registry.add(baked)
-    }
-
-    pub fn spawn(&mut self, geometry: &Geometry, transform: Transform, color: [f32; 4]) -> usize {
-        // Bake the geometry into the MeshRegistry
-        let geometry_id = self._register(geometry);
-
-        // Add the entity to the World (Talks to Logic)
-        self.world.spawn(geometry_id, transform, color)
+    pub fn spawn(&mut self, object: Object, parent_id: Option<usize>) -> usize {
+        self.world.spawn_object(object, parent_id)
     }
 
     pub fn draw_world(&mut self) {
-        // We pass 'self.mesh_registry' because it contains the 'baked_geometries'
-        // (the actual GPU buffers) that 'world' entities reference by ID.
-        self.pipeline.render_world(&self.world, &self.mesh_registry, &self.camera);
+        let mut mesh_data = crate::mesh::MeshData::new();
+        let identity = Transform::default();
+
+        // Flatten the entire world hierarchy into vertices
+        // This visits every Object and combines their Transforms
+        for &root_id in &self.world.roots {
+            mesh_data.add_object(&self.world, root_id, &identity);
+        }
+
+        // Bake this frame's geometry to the GPU
+        // TODO: Reuse buffers instead of creating new ones
+        let world_baked = mesh_data.bake(&self.pipeline);
+
+        self.pipeline.render_baked_mesh(&world_baked, &self.camera);
     }
 }

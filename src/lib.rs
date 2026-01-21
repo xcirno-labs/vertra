@@ -10,6 +10,7 @@ pub mod camera;
 pub mod scene;
 pub mod constants;
 pub mod world;
+pub mod objects;
 
 #[cfg(test)]
 mod tests;
