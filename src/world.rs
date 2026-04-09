@@ -5,6 +5,7 @@ use crate::objects::Object;
 pub struct World {
     pub objects: HashMap<usize, Object>,
     pub roots: Vec<usize>,
+    pub name_handles: HashMap<String, usize>,
     next_id: usize,
 }
 
@@ -14,6 +15,7 @@ impl World {
             objects: HashMap::new(),
             roots: Vec::new(),
             next_id: 0,
+            name_handles: HashMap::new(),
         }
     }
 
@@ -30,7 +32,12 @@ impl World {
         roots: Vec<usize>,
         next_id: usize,
     ) -> Self {
-        Self { objects, roots, next_id }
+        let mut name_handles = HashMap::with_capacity(objects.len());
+
+        for (&id, obj) in &objects {
+            name_handles.insert(obj.str_id.clone(), id);
+        }
+        Self { objects, roots, next_id, name_handles }
     }
 
     pub fn spawn_object(&mut self, mut object: Object, parent_id: Option<usize>) -> usize {
@@ -51,6 +58,32 @@ impl World {
 
         self.objects.insert(id, object);
         id
+    }
+
+    /// Returns the unique integer ID associated with a given string identifier (`str_id`).
+    ///
+    /// This method performs a lookup in the internal handle cache. While the lookup is
+    /// technically $O(1)$ on average, it involves hashing the input string and searching
+    /// a `HashMap`.
+    ///
+    /// # Performance Warning
+    ///
+    /// **Do not use this method inside `on_update` or other high-frequency loops.**
+    ///
+    /// Calling this every frame for multiple objects will cause significant performance
+    /// degradation due to repeated string hashing and cache misses. Instead, "memoize"
+    /// the ID: call this method once during `on_startup`, store the resulting `usize`
+    /// in your application state, and use that integer ID for direct access during updates.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Correct: Resolve once during initialization
+    /// let sun_id = scene.get_id("sun_center").expect("Sun not found in scene!");
+    /// state.sun_id = Some(sun_id);
+    /// ```
+    pub fn get_id(&self, str_id: &str) -> Option<usize> {
+        self.name_handles.get(str_id).copied()
     }
 
     pub fn get_mut(&mut self, id: usize) -> Option<&mut Object> {

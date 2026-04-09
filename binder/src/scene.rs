@@ -1,7 +1,8 @@
 use wasm_bindgen::prelude::*;
+use vertra::scene::{Scene as CoreScene};
+use std::io::Cursor;
 use crate::objects::Object;
 use crate::world::World;
-use vertra::scene::{Scene as CoreScene};
 use crate::camera::Camera;
 
 /// The root container for a 3D environment.
@@ -46,6 +47,31 @@ impl Scene {
                 inner: &mut (*self.inner).camera as *mut vertra::camera::Camera,
                 owned: false,
             }
+        }
+    }
+
+    /// Exports the scene as a VTR binary buffer.
+    /// @returns {Uint8Array} The binary data of the scene.
+    pub fn save_vtr(&self) -> Result<Vec<u8>, JsValue> {
+        unsafe {
+            let mut buf = Vec::new();
+            vertra::vtr::write(&mut buf, &(*self.inner).camera, &(*self.inner).world)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            Ok(buf)
+        }
+    }
+
+    /// Loads a VTR scene from a binary buffer.
+    /// @param {Uint8Array} data - The VTR binary data.
+    pub fn load_vtr(&mut self, data: &[u8]) -> Result<(), JsValue> {
+        unsafe {
+            let mut cur = Cursor::new(data);
+            let scene_data = vertra::vtr::read(&mut cur)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+            (*self.inner).camera = scene_data.camera;
+            (*self.inner).world = scene_data.world;
+            Ok(())
         }
     }
 }

@@ -1,7 +1,35 @@
 use wasm_bindgen::prelude::*;
-use vertra::objects::{Object as CoreObject};
+use vertra::objects::{Object as CoreObject, ObjectConstructor};
 use crate::geometry::Geometry;
 use crate::transform::Transform;
+use serde::Deserialize;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "JsObjectOptions")]
+    pub type JsObjectOptions;
+}
+
+#[wasm_bindgen(typescript_custom_section)]
+const TS_OBJECT_CONTENT: &'static str = r#"
+/**
+ * Configuration options for initializing a new VertraObject.
+ */
+export interface JsObjectOptions {
+    /** * A unique string identifier. If provided, this will be used for World lookups.
+     * If omitted, a random UUID will be generated automatically.
+     */
+    str_id?: string;
+    /** The initial color of the object [r, g, b, a]. */
+    color?: [number, number, number, number];
+}
+"#;
+
+#[derive(Deserialize, Default)]
+struct InternalObjectOptions {
+    str_id: Option<String>,
+    color: Option<[f32; 4]>,
+}
 
 /// Represents a node in the 3D scene graph.
 /// Objects hold a name, a transform (position/rotation/scale), and optional geometry/color data.
@@ -15,20 +43,34 @@ pub struct Object {
 
 #[wasm_bindgen(js_name = VertraObject)]
 impl Object {
-    /// Creates a new scene object with a unique name.
-    /// @param {string} name - The identifier for this object.
+    /// Creates a new scene object.
+    /// @param {string} name - The display name.
+    /// @param {JsObjectOptions} [options] - Initial configuration (str_id, color, etc).
     #[wasm_bindgen(constructor)]
-    pub fn new(name: String) -> Self {
-        let obj = Box::new(CoreObject {
+    pub fn new(name: String, options: Option<JsValue>) -> Self {
+        let opts: InternalObjectOptions = options
+            .and_then(|val| {
+                if val.is_undefined() || val.is_null() {
+                    None
+                } else {
+                    serde_wasm_bindgen::from_value(val).ok()
+                }
+            })
+            .unwrap_or_default();
+        
+        let core_obj = CoreObject::new(ObjectConstructor {
             name,
-            ..Default::default()
+            color: opts.color,
+            str_id: opts.str_id,
+            transform: None,
+            geometry: None,
         });
+
         Self {
-            inner: Box::into_raw(obj),
+            inner: Box::into_raw(Box::new(core_obj)),
             owned: true,
         }
     }
-
     /// Sets the name of the object.
     #[wasm_bindgen(setter)]
     pub fn set_name(&mut self, name: String) {
@@ -83,6 +125,13 @@ impl Object {
         unsafe {
             (*self.inner).parent
         }
+    }
+
+    /// Returns the unique string identifier for this object.
+    /// This is assigned at creation and cannot be changed.
+    #[wasm_bindgen(getter)]
+    pub fn str_id(&self) -> String {
+        unsafe { (*self.inner).str_id.clone() }
     }
 
     /// Returns the number of direct children attached to this object.

@@ -45,6 +45,17 @@ impl World {
         }
     }
 
+    /// Resolves a string identifier (`str_id`) to its unique integer ID.
+    ///
+    /// @param {string} str_id - The string handle (e.g., "player", "sun").
+    /// @returns {number | undefined} The integer ID, or undefined if not found.
+    /// @note This involves a hashmap lookup. Cache the resulting number in JS for hot loops.
+    pub fn get_id(&self, str_id: &str) -> Option<usize> {
+        unsafe {
+            (*self.inner).get_id(str_id)
+        }
+    }
+
     /// Returns a list of IDs for objects that have no parent (the root nodes).
     /// @returns {Uint32Array | number[]} An array of object IDs.
     pub fn get_roots(&self) -> Vec<usize> {
