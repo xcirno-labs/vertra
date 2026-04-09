@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use crate::objects::Object;
 
+#[derive(Debug)]
 pub struct World {
     pub objects: HashMap<usize, Object>,
     pub roots: Vec<usize>,
@@ -14,6 +15,22 @@ impl World {
             roots: Vec::new(),
             next_id: 0,
         }
+    }
+
+    /// Reconstruct a `World` directly from its constituent parts.
+    ///
+    /// Used by the VTR deserializer to rebuild a world without going through
+    /// `spawn_object`, so that the original IDs and hierarchy are preserved
+    /// exactly.
+    ///
+    /// `next_id` should be set to `max(existing_ids) + 1` so that future
+    /// calls to `spawn_object` never collide with the loaded objects.
+    pub fn from_parts(
+        objects: HashMap<usize, Object>,
+        roots: Vec<usize>,
+        next_id: usize,
+    ) -> Self {
+        Self { objects, roots, next_id }
     }
 
     pub fn spawn_object(&mut self, mut object: Object, parent_id: Option<usize>) -> usize {

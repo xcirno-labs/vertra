@@ -4,7 +4,7 @@ use crate::math::Matrix4;
 use crate::constants::camera;
 use crate::window::FrameContext;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Camera {
     pub eye: [f32; 3],    // Position of the camera
     pub target: [f32; 3], // Where the camera is looking

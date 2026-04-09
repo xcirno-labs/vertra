@@ -1,4 +1,5 @@
 pub use winit::{
-    event::{Event, WindowEvent},
+    keyboard::PhysicalKey,
+    event::{Event, WindowEvent, DeviceEvent, ElementState},
     event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
 };

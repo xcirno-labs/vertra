@@ -1,6 +1,8 @@
 use crate::geometry::Geometry;
 use crate::transform::Transform;
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Object {
     pub name: String,
     pub transform: Transform,

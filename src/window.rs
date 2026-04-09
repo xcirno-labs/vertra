@@ -12,6 +12,12 @@ use crate::scene::Scene;
 use crate::constants::window;
 use crate::world::World;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast; // Provides .dyn_into()
+
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::WindowBuilderExtWebSys; // Provides .with_canvas()
+
 pub struct FrameContext {
     pub dt: f32,
 }
@@ -25,6 +31,7 @@ pub struct WindowConfig {
     pub height: u32,
     pub width: u32,
     pub minimum_dimension: [u32; 2],
+    pub canvas_id: Option<String>,
 }
 
 impl Default for WindowConfig {
@@ -34,11 +41,12 @@ impl Default for WindowConfig {
             width: window::DEFAULT_WIDTH,
             height: window::DEFAULT_HEIGHT,
             minimum_dimension: window::MIN_DIMENSION,
+            canvas_id: None,
         }
     }
 }
 
-pub struct Window<S> {
+pub struct Window<S: 'static> {
     pub handle: Option<Arc<winit::window::Window>>,
     state: S,
     config: WindowConfig,
@@ -88,6 +96,11 @@ impl<S> Window<S> {
         self
     }
 
+    pub fn with_canvas_id(mut self, id: impl Into<String>) -> Self {
+        self.config.canvas_id = Some(id.into());
+        self
+    }
+
     // Setters wrap the input in a Box automatically
     pub fn with_event_handler<F>(mut self, function: F) -> Self
     where F: FnMut(&mut S, &mut Scene, Event<()>, &EventLoopWindowTarget<()>) + 'static {
@@ -128,23 +141,53 @@ impl<S> Window<S> {
     pub fn create(mut self) {
         let event_loop = EventLoop::new().unwrap();
 
-        let winit_window = WindowBuilder::new()
+        let mut builder = WindowBuilder::new()
             .with_inner_size(PhysicalSize::new(self.config.width, self.config.height))
             .with_min_inner_size(PhysicalSize::new(
                 self.config.minimum_dimension[0], self.config.minimum_dimension[1]
             ))
-            .with_title(self.config.title)
-            .build(&event_loop)
-            .unwrap();
+            .with_title(self.config.title.clone());
 
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(id) = &self.config.canvas_id {
+                let canvas = web_sys::window()
+                    .and_then(|win| win.document())
+                    .and_then(|doc| doc.get_element_by_id(id))
+                    .and_then(|ent| ent.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+                    .expect("Could not find canvas with the provided ID");
 
-        let mesh_registry = MeshRegistry::new();
+                builder = builder.with_canvas(Some(canvas));
+            }
+        }
+        let winit_window = builder.build(&event_loop).unwrap();
         let window_handle = Arc::new(winit_window);
-        let pipeline = Pipeline::initialize(Arc::clone(&window_handle));
-
         self.handle = Some(Arc::clone(&window_handle));
 
-        let mut last_update_inst = std::time::Instant::now();
+        #[cfg(target_arch = "wasm32")]
+        {
+            // We clone what we need to move into the async block
+            let window_handle_clone = Arc::clone(&window_handle);
+
+            wasm_bindgen_futures::spawn_local(async move {
+                // 1. Wait for GPU/Pipeline to initialize
+                let pipeline = Pipeline::initialize(Arc::clone(&window_handle_clone)).await;
+
+                // 2. Start the loop!
+                self.run_loop(event_loop, pipeline, window_handle_clone);
+            });
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // On Desktop, we block locally just for the init, then run the loop
+            let pipeline = pollster::block_on(Pipeline::initialize(Arc::clone(&window_handle)));
+            self.run_loop(event_loop, pipeline, window_handle);
+        }
+    }
+    fn run_loop(mut self, event_loop: EventLoop<()>, pipeline: Pipeline, window_handle: Arc<winit::window::Window>) {
+        let mesh_registry = MeshRegistry::new();
+        let mut last_update_inst = web_time::Instant::now();
         let camera = self.camera.unwrap_or_else(|| {
             Camera::new().with_aspect(self.config.width as f32 / self.config.height as f32)
         });
@@ -159,8 +202,8 @@ impl<S> Window<S> {
         }
         let mut accumulator = 0.0;
 
-        event_loop.run(move |event, elwt| {
-            let now = std::time::Instant::now();
+        let main_loop = move |event: Event<()>, elwt: &EventLoopWindowTarget<()>| {
+            let now = web_time::Instant::now();
             let dt = now.duration_since(last_update_inst).as_secs_f32();
             last_update_inst = now;
 
@@ -172,12 +215,13 @@ impl<S> Window<S> {
             if let Some(event_handler) = &mut self.event_handler {
                 event_handler(&mut self.state, &mut scene, event.clone(), elwt);
             }
+
             match event {
                 Event::AboutToWait => {
                     accumulator += dt;
                     while accumulator >= window::FIXED_DELTA {
                         if let Some(fixed_update) = &mut self.on_fixed_update_fn {
-                            fixed_update(&mut self.state, &mut scene, &mut FrameContext {dt: window::FIXED_DELTA});
+                            fixed_update(&mut self.state, &mut scene, &mut FrameContext { dt: window::FIXED_DELTA });
                         }
                         accumulator -= window::FIXED_DELTA;
                     }
@@ -201,6 +245,18 @@ impl<S> Window<S> {
                     }
                 }
                 _ => (),
-            }}).unwrap();
+            }
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            event_loop.run(main_loop).unwrap();
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            use winit::platform::web::EventLoopExtWebSys;
+            event_loop.spawn(main_loop);
+        }
     }
 }
+
