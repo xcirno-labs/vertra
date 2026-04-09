@@ -22,7 +22,7 @@ impl Geometry {
     /// @param {number} width - Size along the X-axis.
     /// @param {number} height - Size along the Y-axis.
     /// @param {number} depth - Size along the Z-axis.
-    #[wasm_bindgen]
+    #[wasm_bindgen(js_name = box)]
     pub fn box_geo(width: f32, height: f32, depth: f32) -> Geometry {
         Geometry { inner: CoreGeometry::Box { width, height, depth } }
     }
