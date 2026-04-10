@@ -68,7 +68,7 @@ pub const FORMAT_VERSION: u16 = 1;
 
 /// Engine version embedded in the header for informational purposes.
 pub const ENGINE_VERSION_MAJOR: u16 = 0;
-pub const ENGINE_VERSION_MINOR: u16 = 1;
+pub const ENGINE_VERSION_MINOR: u16 = 2;
 pub const ENGINE_VERSION_PATCH: u16 = 0;
 
 /// Sentinel stored in `parent_id` when an object has no parent.
@@ -339,7 +339,6 @@ pub fn read_header(r: &mut impl Read) -> Result<VtrHeader, VtrError> {
 /// Objects are written in ascending `id` order so the binary output is
 /// deterministic for the same scene regardless of HashMap iteration order.
 pub fn write(w: &mut impl Write, camera: &Camera, world: &World) -> Result<(), VtrError> {
-    // ── Header ──────────────────────────────────────────────────────────────
     w.write_all(&MAGIC)?;
     w_u16(w, FORMAT_VERSION)?;
     w_u16(w, ENGINE_VERSION_MAJOR)?;

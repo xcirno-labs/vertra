@@ -10,7 +10,7 @@ extern "C" {
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_APPEND_CONTENT: &'static str = r#"
-export interface JsTransformOptions {
+export interface TransformOptions {
     position?: [number, number, number];
     rotation?: [number, number, number];
     scale?: [number, number, number];
@@ -75,7 +75,7 @@ impl Transform {
         self.inner.rotation.to_vec()
     }
 
-    /// Sets the rotation. Expects a 3-element array of Euler angles (radians).
+    /// Sets the rotation. Expects a 3-element array of Euler angles (degrees).
     #[wasm_bindgen(setter)]
     pub fn set_rotation(&mut self, val: Vec<f32>) {
         if val.len() == 3 {

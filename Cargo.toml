@@ -6,10 +6,6 @@ name = "vertra"
 version = "0.2.0"
 edition = "2024"
 
-[[bin]]
-name = "vertra_bin"
-path = "src/main.rs"
-
 [dependencies]
 winit = "0.29"
 wgpu = "29.0.1"

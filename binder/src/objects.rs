@@ -57,7 +57,7 @@ impl Object {
                 }
             })
             .unwrap_or_default();
-        
+
         let core_obj = CoreObject::new(ObjectConstructor {
             name,
             color: opts.color,
@@ -84,11 +84,14 @@ impl Object {
     }
 
     /// Updates the object's spatial properties (position, rotation, scale).
+    /// This mutates the underlying core object referenced by `inner`.
+    /// For objects returned from `World::get_object`, that updates the World-backed object;
+    /// for JS-owned objects created via `new`, it updates the boxed standalone template object.
     /// @param {Transform} transform - The new transform state.
     #[wasm_bindgen(setter)]
     pub fn set_transform(&mut self, transform: &Transform) {
         unsafe {
-            // This updates the memory DIRECTLY inside the HashMap
+            // Mutate the underlying core object in place; this may be World-backed or JS-owned
             (*self.inner).transform = transform.inner.clone();
         }
     }

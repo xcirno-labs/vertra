@@ -22,12 +22,13 @@ export interface JsCameraOptions {
     znear?: number;
     /** Distance to the far clipping plane. */
     zfar?: number;
-    /** Initial left-right (yaw) rotation in radians. */
+    /** Initial left-right (yaw) rotation in degrees. */
     lr_rot?: number;
-    /** Initial up-down (pitch) rotation in radians. */
+    /** Initial up-down (pitch) rotation in degress. */
     ud_rot?: number;
     /** The initial [x, y, z] position of the camera in world space. */
-    position?: [number, number, number];}
+    position?: [number, number, number];
+}
 "#;
 
 #[derive(Deserialize)]
