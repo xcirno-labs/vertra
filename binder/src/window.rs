@@ -64,11 +64,11 @@ impl WebWindow {
         }
     }
 
-    /// Sets the function to call once before the first frame.
+    /// Sets the function to call every frame for logic updates.
     /// Callback signature: (state, scene, frameContext) => void
     pub fn on_update(&mut self, f: Function) { self.on_update = Some(f); }
 
-    /// Sets the function to call every frame for logic updates.
+    /// Sets the function to call once before the first frame.
     /// Callback signature: (state, scene, frameContext) => void
     pub fn on_startup(&mut self, f: Function) { self.on_startup = Some(f); }
 

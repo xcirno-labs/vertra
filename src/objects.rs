@@ -41,7 +41,7 @@ impl Object {
             transform: config.transform.unwrap_or_default(),
             geometry: config.geometry,
             // Since we use UUID to generate
-            str_id: config.str_id.unwrap_or_default(),
+            str_id: config.str_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
             color: config.color.unwrap_or([1.0, 1.0, 1.0, 1.0]),
             children: Vec::new(),
             parent: None,

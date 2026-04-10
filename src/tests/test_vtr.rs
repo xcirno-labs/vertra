@@ -17,7 +17,7 @@
 ///   - error path: unknown geometry tag
 ///   - error path: truncated data (unexpected EOF)
 ///   - UTF-8 object names (including multibyte characters)
-///   - object with maximum-length name (u16::MAX bytes)
+///   - object with long names (including a 300-byte name)
 ///   - deeply nested hierarchy (3 levels)
 ///   - multiple root objects, order preserved
 ///   - object with no geometry but non-default transform and color
@@ -961,7 +961,7 @@ fn str_id_cleanup_on_delete() {
     );
 
     // Ensure it exists first
-    assert!(!world.get_id(&sid).is_some());
+    assert!(world.get_id(&sid).is_some());
 
     // Delete the object
     world.delete(id);

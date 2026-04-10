@@ -44,8 +44,8 @@ impl World {
         let id = self.next_id;
         self.next_id += 1;
 
+        self.name_handles.insert(object.str_id.clone(), id);
         object.parent = parent_id;
-
         // If it has a parent, link the child to the parent
         if let Some(p_id) = parent_id {
             if let Some(parent_obj) = self.objects.get_mut(&p_id) {
@@ -93,6 +93,7 @@ impl World {
     fn recursive_remove(&mut self, id: usize) {
         // Remove the object and take ownership of its children list
         if let Some(obj) = self.objects.remove(&id) {
+            self.name_handles.remove(&obj.str_id);
             for child_id in obj.children {
                 self.recursive_remove(child_id);
             }
@@ -101,9 +102,11 @@ impl World {
 
     pub fn delete(&mut self, id: usize) {
         if let Some(obj) = self.objects.remove(&id) {
+            self.name_handles.remove(&obj.str_id);
             if let Some(p_id) = obj.parent {
                 if let Some(parent) = self.objects.get_mut(&p_id) {
                     parent.children.retain(|&child_id| child_id != id);
+
                 }
             } else {
                 self.roots.retain(|&root_id| root_id != id);
