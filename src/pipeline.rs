@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use wgpu::{Device, Queue, Surface};
+use wgpu::{Device, PipelineCompilationOptions, Queue, Surface};
 use wgpu::util::DeviceExt;
 use crate::camera::Camera;
 use crate::mesh::{BakedMesh, Vertex};
@@ -28,22 +28,20 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn initialize(window: Arc<winit::window::Window>) -> Self {
+    pub async fn initialize(window: Arc<winit::window::Window>) -> Self {
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(Arc::clone(&window)).unwrap();
-        let adapter = pollster::block_on(instance.request_adapter(
+        let adapter = instance.request_adapter(
             &wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             },
-        )).unwrap();
+        ).await.expect("Failed to find an appropriate adapter");
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
+        let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor::default(),
-            None,
-        )).unwrap();
-
+        ).await.expect("Failed to create device");
 
         let size = window.inner_size();
         let surface_config = surface.get_default_config(&adapter, size.width, size.height).unwrap();
@@ -84,8 +82,8 @@ impl Pipeline {
 
         let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[&camera_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&camera_bind_group_layout)],
+            immediate_size: 0
         });
 
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -108,9 +106,12 @@ impl Pipeline {
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&render_pipeline_layout),
+            cache: None,
+            multiview_mask: None,
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
+                compilation_options: PipelineCompilationOptions::default(),
                 buffers: &[
                     wgpu::VertexBufferLayout {
                         array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
@@ -134,7 +135,8 @@ impl Pipeline {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
+                compilation_options: PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -147,14 +149,13 @@ impl Pipeline {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
+                depth_write_enabled: Some(true),
                 // "Less" means: Draw the new pixel only if its distance is LESS than the existing one
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
         });
 
         Self {
@@ -172,19 +173,19 @@ impl Pipeline {
 
     pub fn render_baked_mesh(&mut self, mesh: &BakedMesh, camera: &Camera) {
         let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Outdated) => {
-                self.surface.configure(&self.device, &self.surface_config);
+            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                frame
+            }
+            wgpu::CurrentSurfaceTexture::Timeout => return,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 return;
             }
-            Err(e) => {
-                eprintln!("Dropped frame due to error: {:?}", e);
-                return;
-            }
+            wgpu::CurrentSurfaceTexture::Occluded => return,
+            wgpu::CurrentSurfaceTexture::Validation => panic!("Surface validation error"),
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Update Global Camera Uniform
         let camera_matrix = camera.build_view_projection_matrix();
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_matrix.data]));
 
@@ -199,6 +200,7 @@ impl Pipeline {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_view,
@@ -216,13 +218,13 @@ impl Pipeline {
             // We only need Bind Group 0 (Camera).
             // All position/color data is already "baked" into the vertex buffer.
             rpass.set_bind_group(0, &self.camera_bind_group, &[]);
-
-            rpass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            rpass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-
-            // DRAW CALL: This draws the entire world in one shot
-            // (might change in the future)
-            rpass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            if mesh.index_count > 0 {
+                rpass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                rpass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                // DRAW CALL: This draws the entire world in one shot
+                // (might change in the future)
+                rpass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

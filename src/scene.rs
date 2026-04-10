@@ -4,6 +4,7 @@ use crate::pipeline::Pipeline;
 use crate::world::World;
 use crate::objects::Object;
 use crate::transform::Transform;
+use crate::vtr::{self, VtrError};
 
 pub struct Scene {
     pub pipeline: Pipeline,
@@ -32,5 +33,30 @@ impl Scene {
         let world_baked = mesh_data.bake(&self.pipeline);
 
         self.pipeline.render_baked_mesh(&world_baked, &self.camera);
+    }
+
+    /// Serialize the current camera and world to a `.vtr` binary file.
+    ///
+    /// Creates or truncates the file at `path`.
+    ///
+    /// # Errors
+    /// Returns a [`VtrError`] on I/O failure or serialization problems.
+    pub fn save_vtr_file(&self, path: &std::path::Path) -> Result<(), VtrError> {
+        vtr::write_to_file(path, &self.camera, &self.world)
+    }
+
+    /// Replace the current camera and world with the contents of a `.vtr` file.
+    ///
+    /// The GPU pipeline is **not** affected — only the logical scene state
+    /// (camera, objects, hierarchy) is replaced.
+    ///
+    /// # Errors
+    /// Returns a [`VtrError`] on I/O failure, bad magic bytes, unsupported
+    /// format version, or any other parse error.
+    pub fn load_vtr_file(&mut self, path: &std::path::Path) -> Result<(), VtrError> {
+        let data = vtr::read_from_file(path)?;
+        self.camera = data.camera;
+        self.world = data.world;
+        Ok(())
     }
 }

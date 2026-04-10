@@ -1,9 +1,11 @@
 use crate::mesh::{MeshData, Vertex};
 use crate::transform::Transform;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Copy, Clone)]
 pub struct GeometryId(pub usize);
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Geometry {
     Cube { size: f32 },
     Box { width: f32, height: f32, depth: f32 },

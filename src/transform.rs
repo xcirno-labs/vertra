@@ -1,5 +1,7 @@
 use crate::math::Matrix4;
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Transform {
     pub position: [f32; 3],
     pub rotation: [f32; 3],  // All rotation-related data are measured in degrees
