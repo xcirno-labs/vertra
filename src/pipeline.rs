@@ -17,6 +17,9 @@ pub struct PipelineConfig {
 
 pub struct Pipeline {
     pub render_pipeline: wgpu::RenderPipeline,
+    /// Depth = Always, no culling, no depth-write.
+    /// Used for both the skybox (layer 1) and gizmo overlays (layer 3).
+    overlay_pipeline: wgpu::RenderPipeline,
     pub shader: wgpu::ShaderModule,
     pub device: Device,
     pub queue: Queue,
@@ -26,6 +29,16 @@ pub struct Pipeline {
     camera_bind_group: wgpu::BindGroup,
     depth_view: wgpu::TextureView,
 }
+
+// Shared vertex buffer layout (position + color)
+const VERTEX_ATTRS: [wgpu::VertexAttribute; 2] = [
+    wgpu::VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x3 },
+    wgpu::VertexAttribute {
+        offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+        shader_location: 1,
+        format: wgpu::VertexFormat::Float32x3,
+    },
+];
 
 impl Pipeline {
     pub async fn initialize(window: Arc<winit::window::Window>) -> Self {
@@ -55,10 +68,8 @@ impl Pipeline {
             mapped_at_creation: false,
         });
 
-        // Create a Bind Group (How the shader accesses this buffer)
         let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[wgpu::BindGroupLayoutEntry {
-                // This is the @binding(0) in shader file
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
@@ -80,62 +91,41 @@ impl Pipeline {
             label: Some("camera_bind_group"),
         });
 
-        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[Some(&camera_bind_group_layout)],
-            immediate_size: 0
+            immediate_size: 0,
         });
 
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Depth Texture"),
-            size: wgpu::Extent3d {
-                width: surface_config.width,
-                height: surface_config.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
+            size: wgpu::Extent3d { width: surface_config.width, height: surface_config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
-
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let vertex_buf_layout = wgpu::VertexBufferLayout {
+            array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &VERTEX_ATTRS,
+        };
+
+        // Main pipeline (normal depth, back-face culled)
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            cache: None,
-            multiview_mask: None,
+            layout: Some(&pipeline_layout),
+            cache: None, multiview_mask: None,
             vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
+                module: &shader, entry_point: Some("vs_main"),
                 compilation_options: PipelineCompilationOptions::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            // position: [f32; 3]
-                            wgpu::VertexAttribute {
-                                offset: 0,
-                                shader_location: 0,  // This is @location(0) in wgsl
-                                format: wgpu::VertexFormat::Float32x3,
-                            },
-                            // color: [f32; 3]
-                            wgpu::VertexAttribute {
-                                offset: size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                                shader_location: 1,  // This is @location(1) in wgsl
-                                format: wgpu::VertexFormat::Float32x3,
-                            },
-                        ],
-                    }
-                ],
+                buffers: &[vertex_buf_layout.clone()],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
+                module: &shader, entry_point: Some("fs_main"),
                 compilation_options: PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
@@ -143,15 +133,41 @@ impl Pipeline {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            },
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(true),
-                // "Less" means: Draw the new pixel only if its distance is LESS than the existing one
                 depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+        });
+
+        // Used for both the skybox (rendered first) and gizmo overlays (rendered last).
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Overlay Pipeline"),
+            layout: Some(&pipeline_layout),
+            cache: None, multiview_mask: None,
+            vertex: wgpu::VertexState {
+                module: &shader, entry_point: Some("vs_main"),
+                compilation_options: PipelineCompilationOptions::default(),
+                buffers: &[vertex_buf_layout],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader, entry_point: Some("fs_main"),
+                compilation_options: PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -160,6 +176,7 @@ impl Pipeline {
 
         Self {
             render_pipeline,
+            overlay_pipeline,
             shader,
             device,
             queue,
@@ -171,90 +188,100 @@ impl Pipeline {
         }
     }
 
-    pub fn render_baked_mesh(&mut self, mesh: &BakedMesh, camera: &Camera) {
+    /// Render in three layers within a single render pass:
+    /// 1. `skybox`  - depth=Always, no depth-write -> always behind everything
+    /// 2. `world`   - normal depth test + write
+    /// 3. `overlay` - depth=Always, no depth-write -> always in front (gizmos)
+    pub fn render_scene(
+        &mut self,
+        camera: &Camera,
+        world: &BakedMesh,
+        skybox: Option<&BakedMesh>,
+        overlay: Option<&BakedMesh>,
+    ) {
         let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                frame
-            }
-            wgpu::CurrentSurfaceTexture::Timeout => return,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                return;
-            }
-            wgpu::CurrentSurfaceTexture::Occluded => return,
-            wgpu::CurrentSurfaceTexture::Validation => panic!("Surface validation error"),
+            wgpu::CurrentSurfaceTexture::Success(f)    => f,
+            wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            _ => return,
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let camera_matrix = camera.build_view_projection_matrix();
-        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_matrix.data]));
+        let cam_mat = camera.build_view_projection_matrix();
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_mat.data]));
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-
-                    view: &view,// Expected: &wgpu::api::texture_view::TextureView
+                    view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.05, g: 0.07, b: 0.12, a: 1.0 }),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: None,
                 }),
                 ..Default::default()
             });
 
-            rpass.set_pipeline(&self.render_pipeline);
+            rp.set_bind_group(0, &self.camera_bind_group, &[]);
 
-            // We only need Bind Group 0 (Camera).
-            // All position/color data is already "baked" into the vertex buffer.
-            rpass.set_bind_group(0, &self.camera_bind_group, &[]);
-            if mesh.index_count > 0 {
-                rpass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                rpass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                // DRAW CALL: This draws the entire world in one shot
-                // (might change in the future)
-                rpass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            // Layer 1: Skybox (overlay pipeline → depth=Always, no depth write)
+            if let Some(sky) = skybox {
+                if sky.index_count > 0 {
+                    rp.set_pipeline(&self.overlay_pipeline);
+                    rp.set_vertex_buffer(0, sky.vertex_buffer.slice(..));
+                    rp.set_index_buffer(sky.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    rp.draw_indexed(0..sky.index_count, 0, 0..1);
+                }
+            }
+
+            // Layer 2: World (main pipeline → normal depth)
+            if world.index_count > 0 {
+                rp.set_pipeline(&self.render_pipeline);
+                rp.set_vertex_buffer(0, world.vertex_buffer.slice(..));
+                rp.set_index_buffer(world.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                rp.draw_indexed(0..world.index_count, 0, 0..1);
+            }
+
+            // Layer 3: Overlay / gizmos (overlay pipeline → depth=Always, always on top)
+            if let Some(ov) = overlay {
+                if ov.index_count > 0 {
+                    rp.set_pipeline(&self.overlay_pipeline);
+                    rp.set_vertex_buffer(0, ov.vertex_buffer.slice(..));
+                    rp.set_index_buffer(ov.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    rp.draw_indexed(0..ov.index_count, 0, 0..1);
+                }
             }
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        self.queue.submit(std::iter::once(enc.finish()));
         frame.present();
+    }
+
+    pub fn render_baked_mesh(&mut self, mesh: &BakedMesh, camera: &Camera) {
+        self.render_scene(camera, mesh, None, None);
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
-            // Update surface configuration
             self.surface_config.width = new_size.width;
             self.surface_config.height = new_size.height;
             self.surface.configure(&self.device, &self.surface_config);
-
-            // Update the view and the camera aspect ratio
             self.depth_view = self.create_depth_view(new_size);
         }
     }
 
     fn create_depth_view(&self, size: winit::dpi::PhysicalSize<u32>) -> wgpu::TextureView {
-        // Recreate the Depth Texture with the given size
         let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Depth Texture"),
-            size: wgpu::Extent3d {
-                width: size.width,
-                height: size.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
+            size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -269,17 +296,11 @@ impl Pipeline {
             contents: bytemuck::cast_slice(vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
-
         let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Baked Index Buffer"),
             contents: bytemuck::cast_slice(indices),
             usage: wgpu::BufferUsages::INDEX,
         });
-
-        BakedMesh {
-            vertex_buffer,
-            index_buffer,
-            index_count: indices.len() as u32,
-        }
+        BakedMesh { vertex_buffer, index_buffer, index_count: indices.len() as u32 }
     }
 }

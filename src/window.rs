@@ -4,11 +4,15 @@ use winit::{
 };
 use std::sync::Arc;
 
-use crate::event::{Event, EventLoopWindowTarget, EventLoop, WindowEvent};
-use crate::pipeline::{Pipeline};
+use crate::event::{
+    Event, EventLoopWindowTarget, EventLoop, WindowEvent,
+    MouseButton, MouseScrollDelta, ElementState, DeviceEvent,
+};
+use crate::pipeline::Pipeline;
 use crate::camera::Camera;
 use crate::mesh::MeshRegistry;
 use crate::scene::Scene;
+use crate::editor::EditorEvent;
 use crate::constants::window;
 use crate::world::World;
 
@@ -141,6 +145,7 @@ impl<S> Window<S> {
     pub fn create(mut self) {
         let event_loop = EventLoop::new().unwrap();
 
+        #[allow(unused_mut)]
         let mut builder = WindowBuilder::new()
             .with_inner_size(PhysicalSize::new(self.config.width, self.config.height))
             .with_min_inner_size(PhysicalSize::new(
@@ -196,6 +201,7 @@ impl<S> Window<S> {
             mesh_registry,
             camera,
             world: World::new(),
+            editor: None,
         };
         if let Some(startup_fn) = &mut self.on_startup_fn {
             startup_fn(&mut self.state, &mut scene, &mut FrameContext {dt: 0.0});
@@ -209,6 +215,11 @@ impl<S> Window<S> {
 
             if let Some(update_fn) = &mut self.on_update_fn {
                 update_fn(&mut self.state, &mut scene, &mut FrameContext { dt } );
+            }
+
+            if scene.editor.is_some() {
+                scene.update_editor(dt);
+                dispatch_editor_event(&mut scene, &event);
             }
 
             // Handle all events (including AboutToWait)
@@ -240,6 +251,9 @@ impl<S> Window<S> {
                         WindowEvent::Resized(new_size) => {
                             scene.pipeline.resize(new_size);
                             scene.camera.aspect = new_size.width as f32 / new_size.height as f32;
+                            if let Some(ed) = &mut scene.editor {
+                                ed.set_viewport_size(new_size.width as f32, new_size.height as f32);
+                            }
                         }
                         _ => ()
                     }
@@ -257,6 +271,75 @@ impl<S> Window<S> {
             use winit::platform::web::EventLoopExtWebSys;
             event_loop.spawn(main_loop);
         }
+    }
+}
+
+/// Convert winit events into [`EditorEvent`]s and dispatch them to the scene.
+/// No-op when editor mode is inactive.
+fn dispatch_editor_event(scene: &mut Scene, event: &Event<()>) {
+    use winit::keyboard::{PhysicalKey, KeyCode};
+
+    match event {
+        Event::WindowEvent { event: wev, .. } => match wev {
+
+            WindowEvent::CursorMoved { position, .. } => {
+                scene.handle_editor_event(EditorEvent::CursorMoved {
+                    x: position.x as f32,
+                    y: position.y as f32,
+                });
+            }
+
+            WindowEvent::MouseInput { state, button, .. } => {
+                let pressed = *state == ElementState::Pressed;
+                scene.handle_editor_event(EditorEvent::MouseButton {
+                    left:   (*button == MouseButton::Left).then_some(pressed),
+                    middle: (*button == MouseButton::Middle).then_some(pressed),
+                    right:  (*button == MouseButton::Right).then_some(pressed),
+                });
+            }
+
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scroll = match delta {
+                    MouseScrollDelta::LineDelta(_, y)  => *y,
+                    MouseScrollDelta::PixelDelta(p)    => p.y as f32 * 0.1,
+                };
+                scene.handle_editor_event(EditorEvent::Scroll { delta: scroll });
+            }
+
+            WindowEvent::ModifiersChanged(mods) => {
+                scene.handle_editor_event(EditorEvent::ModifiersChanged {
+                    alt: mods.state().alt_key(),
+                });
+            }
+
+            WindowEvent::KeyboardInput { event: ke, .. } => {
+                if let PhysicalKey::Code(code) = ke.physical_key {
+                    match ke.state {
+                        ElementState::Pressed => {
+                            scene.handle_editor_event(EditorEvent::KeyPressed(code));
+                            // F also triggers the Focus action
+                            if code == KeyCode::KeyF {
+                                scene.handle_editor_event(EditorEvent::FocusKey);
+                            }
+                        }
+                        ElementState::Released => {
+                            scene.handle_editor_event(EditorEvent::KeyReleased(code));
+                        }
+                    }
+                }
+            }
+
+            _ => {}
+        },
+
+        Event::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } => {
+            scene.handle_editor_event(EditorEvent::MouseMotionDelta {
+                dx: delta.0 as f32,
+                dy: delta.1 as f32,
+            });
+        }
+
+        _ => {}
     }
 }
 

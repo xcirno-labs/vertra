@@ -5,6 +5,8 @@ use crate::scene::Scene;
 use vertra::event::{Event, WindowEvent};
 use js_sys::Function;
 use serde::Serialize;
+use winit::event::{MouseButton, MouseScrollDelta};
+use vertra::editor::EditorEvent;
 use crate::camera::Camera;
 
 #[wasm_bindgen(start)]
@@ -33,6 +35,12 @@ pub enum WebEvent {
     MouseMove { x: f64, y: f64 },
     #[serde(rename = "mousemotion")]
     MouseMotion { dx: f64, dy: f64 },
+    #[serde(rename = "mousedown")]
+    MouseDown { button: String },
+    #[serde(rename = "mouseup")]
+    MouseUp { button: String },
+    #[serde(rename = "mousemove")]
+    Wheel { delta: f32 }
 }
 
 /// The main application controller that manages the canvas and the render loop.
@@ -43,6 +51,7 @@ pub struct WebWindow {
     on_update: Option<Function>,
     on_draw_request: Option<Function>,
     on_startup: Option<Function>,
+    on_select: Option<Function>,
     with_event_handler: Option<Function>,
 }
 
@@ -60,6 +69,7 @@ impl WebWindow {
             on_update: None,
             on_draw_request: None,
             on_startup: None,
+            on_select: None,
             with_event_handler: None,
         }
     }
@@ -80,6 +90,12 @@ impl WebWindow {
     /// Callback signature: (state, scene, event) => void
     /// The event is an object: { type: string, data: any }
     pub fn with_event_handler(&mut self, f: Function) { self.with_event_handler = Some(f); }
+
+    /// Registers a callback fired whenever the inspector selection changes
+    /// (editor mode only).
+    /// Callback signature: `(data: InspectorData | undefined) => void`
+    /// `data` is `undefined` when the selection is cleared.
+    pub fn on_select(&mut self, f: Function) { self.on_select = Some(f); }
 
     /// Initializes the engine and starts the RequestAnimationFrame loop.
     /// @param {string} canvas_id - The ID of the HTMLCanvasElement to target.
@@ -141,38 +157,113 @@ impl WebWindow {
         }
 
         if let Some(f) = self.with_event_handler {
+            let on_select_fn = self.on_select.clone();
             engine_window = engine_window.with_event_handler(move |state, scene, event, _elwt| {
+
+                if scene.editor.is_some() {
+                    let ed_ev: Option<EditorEvent> = match &event {
+                        Event::WindowEvent { event: wev, .. } => match wev {
+                            WindowEvent::CursorMoved { position, .. } => Some(EditorEvent::CursorMoved {
+                                x: position.x as f32, y: position.y as f32,
+                            }),
+                            WindowEvent::MouseInput { state: s, button, .. } => {
+                                let pressed = *s == ElementState::Pressed;
+                                Some(EditorEvent::MouseButton {
+                                    left:   (*button == MouseButton::Left).then_some(pressed),
+                                    middle: (*button == MouseButton::Middle).then_some(pressed),
+                                    right:  (*button == MouseButton::Right).then_some(pressed),
+                                })
+                            }
+                            WindowEvent::MouseWheel { delta, .. } => {
+                                let scroll = match delta {
+                                    MouseScrollDelta::LineDelta(_, y) => *y,
+                                    MouseScrollDelta::PixelDelta(p)   => p.y as f32 * 0.1,
+                                };
+                                Some(EditorEvent::Scroll { delta: scroll })
+                            }
+                            WindowEvent::ModifiersChanged(mods) => {
+                                Some(EditorEvent::ModifiersChanged { alt: mods.state().alt_key() })
+                            }
+                            WindowEvent::KeyboardInput { event: ke, .. }
+                                if ke.state == ElementState::Pressed =>
+                            {
+                                use vertra::event::PhysicalKey;
+                                use winit::keyboard::KeyCode;
+                                if let PhysicalKey::Code(KeyCode::KeyF) = ke.physical_key {
+                                    Some(EditorEvent::FocusKey)
+                                } else { None }
+                            }
+                            _ => None,
+                        },
+                        Event::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } => {
+                            Some(EditorEvent::MouseMotionDelta {
+                                dx: delta.0 as f32, dy: delta.1 as f32,
+                            })
+                        }
+                        _ => None,
+                    };
+
+                    let prev_id = scene.inspector().map(|d| d.id);
+
+                    if let Some(e) = ed_ev {
+                        scene.handle_editor_event(e);
+                    }
+
+                    // Fire on_select when the selection changes
+                    let curr_id = scene.inspector().map(|d| d.id);
+                    if curr_id != prev_id {
+                        if let Some(sel_fn) = &on_select_fn {
+                            let js_val = scene.inspector()
+                                .and_then(|d| {
+                                    let js = crate::editor::JsInspectorData::from(d);
+                                    serde_wasm_bindgen::to_value(&js).ok()
+                                })
+                                .unwrap_or(JsValue::UNDEFINED);
+                            let _ = sel_fn.call1(&JsValue::UNDEFINED, &js_val);
+                        }
+                    }
+                }
+
                 let web_event = match event {
-                    // Handle Keyboard Input
                     Event::WindowEvent { event: WindowEvent::KeyboardInput { event: key_event, .. }, .. } => {
                         if let PhysicalKey::Code(code) = key_event.physical_key {
-                            let code_str = format!("{:?}", code); // e.g., "KeyW"
+                            let code_str = format!("{:?}", code);
                             match key_event.state {
                                 ElementState::Pressed => Some(WebEvent::KeyDown {
-                                    code: code_str,
-                                    repeat: key_event.repeat
+                                    code: code_str, repeat: key_event.repeat
                                 }),
-                                ElementState::Released => Some(WebEvent::KeyUp {
-                                    code: code_str
-                                }),
+                                ElementState::Released => Some(WebEvent::KeyUp { code: code_str }),
                             }
                         } else { None }
                     }
-
-                    // Handle Raw Mouse Motion (for camera rotation)
                     Event::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } => {
                         Some(WebEvent::MouseMotion { dx: delta.0, dy: delta.1 })
                     }
-
-                    // Handle Cursor Position
                     Event::WindowEvent { event: WindowEvent::CursorMoved { position, .. }, .. } => {
                         Some(WebEvent::MouseMove { x: position.x, y: position.y })
                     }
-
+                    Event::WindowEvent { event: WindowEvent::MouseInput { state: s, button, .. }, .. } => {
+                        let btn_str = match button {
+                            MouseButton::Left   => "left",
+                            MouseButton::Right  => "right",
+                            MouseButton::Middle => "middle",
+                            _                   => "other",
+                        }.to_string();
+                        match s {
+                            ElementState::Pressed  => Some(WebEvent::MouseDown { button: btn_str }),
+                            ElementState::Released => Some(WebEvent::MouseUp   { button: btn_str }),
+                        }
+                    }
+                    Event::WindowEvent { event: WindowEvent::MouseWheel { delta, .. }, .. } => {
+                        let scroll = match delta {
+                            MouseScrollDelta::LineDelta(_, y) => y,
+                            MouseScrollDelta::PixelDelta(p)   => p.y as f32 * 0.1,
+                        };
+                        Some(WebEvent::Wheel { delta: scroll })
+                    }
                     _ => None,
                 };
 
-                // If we have an event, serialize it to a JsValue and send it to JS
                 if let Some(e) = web_event {
                     if let Ok(js_event_obj) = serde_wasm_bindgen::to_value(&e) {
                         let _ = f.call3(
