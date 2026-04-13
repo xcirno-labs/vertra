@@ -252,15 +252,23 @@ impl<S> Window<S> {
         let camera = self.camera.unwrap_or_else(|| {
             Camera::new().with_aspect(self.config.width as f32 / self.config.height as f32)
         });
-        let mut scene = Scene {
+        // Box the scene so its heap address is stable from this point forward.
+        // on_startup fires before the event loop starts; without Boxing the scene
+        // lives on the Rust stack here and is later moved into the main_loop
+        // closure (and again when the closure is boxed for spawn_local on WASM).
+        // Any raw pointer derived from `&mut scene` during on_startup would
+        // therefore dangle after the first move.  With Box::new the contents
+        // never move — only the thin pointer does — so the address stays valid
+        // for the entire lifetime of the engine.
+        let mut scene = Box::new(Scene {
             pipeline,
             mesh_registry,
             camera,
             world: World::new(),
             editor: None,
-        };
+        });
         if let Some(startup_fn) = &mut self.on_startup_fn {
-            startup_fn(&mut self.state, &mut scene, &mut FrameContext { dt: 0.0 });
+            startup_fn(&mut self.state, &mut *scene, &mut FrameContext { dt: 0.0 });
         }
         let mut accumulator = 0.0_f32;
         let main_loop = move |event: Event<()>, elwt: &EventLoopWindowTarget<()>| {
@@ -270,7 +278,7 @@ impl<S> Window<S> {
 
             if scene.editor.is_none() {
                 if let Some(f) = &mut self.on_update_fn {
-                    f(&mut self.state, &mut scene, &mut FrameContext { dt });
+                    f(&mut self.state, &mut *scene, &mut FrameContext { dt });
                 }
             }
 
@@ -284,7 +292,7 @@ impl<S> Window<S> {
                 let prev_selection_id = scene.editor.as_ref()
                     .and_then(|ed| ed.inspector.selected.as_ref().map(|s| s.id));
 
-                dispatch_editor_event(&mut scene, &event);
+                dispatch_editor_event(&mut *scene, &event);
 
                 if self.on_editor_state_event_fn.is_some() {
                     let mut to_fire: Vec<(EditorStateEvent, Option<Object>)> = Vec::new();
@@ -321,14 +329,14 @@ impl<S> Window<S> {
                     }
                     for (ev, obj) in to_fire {
                         if let Some(f) = &mut self.on_editor_state_event_fn {
-                            f(&mut self.state, &mut scene, ev, obj);
+                            f(&mut self.state, &mut *scene, ev, obj);
                         }
                     }
                 }
             }
 
             if let Some(f) = &mut self.event_handler {
-                f(&mut self.state, &mut scene, event.clone(), elwt);
+                f(&mut self.state, &mut *scene, event.clone(), elwt);
             }
 
             match event {
@@ -337,7 +345,7 @@ impl<S> Window<S> {
                     while accumulator >= window::FIXED_DELTA {
                         if scene.editor.is_none() {
                             if let Some(f) = &mut self.on_fixed_update_fn {
-                                f(&mut self.state, &mut scene, &mut FrameContext { dt: window::FIXED_DELTA });
+                                f(&mut self.state, &mut *scene, &mut FrameContext { dt: window::FIXED_DELTA });
                             }
                         }
                         accumulator -= window::FIXED_DELTA;
@@ -352,7 +360,7 @@ impl<S> Window<S> {
                         WindowEvent::RedrawRequested => {
                             if scene.editor.is_none() {
                                 if let Some(f) = &mut self.on_draw_requested_fn {
-                                    f(&mut self.state, &mut scene, &mut FrameContext { dt });
+                                    f(&mut self.state, &mut *scene, &mut FrameContext { dt });
                                 }
                             }
                             scene.draw_world();

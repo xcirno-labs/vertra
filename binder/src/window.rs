@@ -40,7 +40,7 @@ pub enum WebEvent {
     MouseDown { button: String },
     #[serde(rename = "mouseup")]
     MouseUp { button: String },
-    #[serde(rename = "mousemove")]
+    #[serde(rename = "wheel")]
     Wheel { delta: f32 }
 }
 
@@ -52,7 +52,6 @@ pub struct WebWindow {
     on_update: Option<Function>,
     on_draw_request: Option<Function>,
     on_startup: Option<Function>,
-    on_select: Option<Function>,
     on_editor_event: Option<Function>,
     with_event_handler: Option<Function>,
 }
@@ -71,7 +70,6 @@ impl WebWindow {
             on_update: None,
             on_draw_request: None,
             on_startup: None,
-            on_select: None,
             on_editor_event: None,
             with_event_handler: None,
         }
@@ -91,29 +89,15 @@ impl WebWindow {
 
     /// Registers a handler for input events (keyboard/mouse).
     /// Callback signature: (state, scene, event) => void
-    /// The event is an object: { type: string, data: any }
     pub fn with_event_handler(&mut self, f: Function) { self.with_event_handler = Some(f); }
 
-    /// Registers a callback fired whenever the inspector selection changes
-    /// (editor mode only).
-    /// Callback signature: `(data: InspectorData | undefined) => void`
-    /// `data` is `undefined` when the selection is cleared.
-    pub fn on_select(&mut self, f: Function) { self.on_select = Some(f); }
-
-    /// Registers a callback fired when editor state changes that are relevant
-    /// to the scene editor UI (gizmo mode switches, drag start/end).
+    /// Registers a callback fired when editor state changes.
     ///
-    /// The callback receives a single [`EditorEventType`] object.
-    ///
-    /// # Example
-    ///
-    /// ```ts
-    /// window.on_editor_event(ev => {
-    ///   if (ev.type === "gizmo_mode_changed") setActiveGizmo(ev.mode);
-    ///   if (ev.type === "drag_start")  console.log("dragging", ev.axis);
-    ///   if (ev.type === "drag_end")    console.log("drag released");
-    /// });
-    /// ```
+    /// Receives a single [`EditorEventType`] object. Events:
+    /// - `gizmo_mode_changed` — active gizmo switched (T / R / E keys)
+    /// - `drag_start` / `drag_end` — gizmo axis drag begins / ends
+    /// - `selection_changed` — inspector selection changed (click or programmatic);
+    ///   `data` is [`InspectorData`] or `null` when cleared
     ///
     /// Callback signature: `(event: EditorEventType) => void`
     pub fn on_editor_event(&mut self, f: Function) { self.on_editor_event = Some(f); }
@@ -181,18 +165,21 @@ impl WebWindow {
         // event-driven callbacks is set.  This decouples on_select and
         // on_editor_event from requiring with_event_handler to be set.
         let needs_event_handler = self.with_event_handler.is_some()
-            || self.on_select.is_some()
             || self.on_editor_event.is_some();
 
         if needs_event_handler {
-            let on_select_fn      = self.on_select.clone();
-            let on_editor_ev_fn   = self.on_editor_event.clone();
-            let user_event_fn     = self.with_event_handler;
+            let on_editor_ev_fn = self.on_editor_event.clone();
+            let user_event_fn   = self.with_event_handler;
+
+            // Store the callback in the thread-local so programmatic selection
+            // changes (set_multi_selected, clear_selection, …) can fire it too.
+            crate::editor::register_editor_event_cb(on_editor_ev_fn.clone());
 
             // State tracking for on_editor_event – captured by value into the
             // FnMut closure so they persist across frames.
             let mut prev_gizmo_mode  = vertra::editor::GizmoMode::Translate;
             let mut prev_is_dragging = false;
+            let mut prev_selection_id: Option<usize> = None;
 
             engine_window = engine_window.with_event_handler(move |state, scene, event, _elwt| {
 
@@ -250,23 +237,21 @@ impl WebWindow {
                         _ => None,
                     };
 
-                    let prev_id = scene.inspector().map(|d| d.id);
-
                     if let Some(e) = ed_ev {
                         scene.handle_editor_event(e);
                     }
 
-                    // ── on_select: fire when selection changes ────────────────
-                    let curr_id = scene.inspector().map(|d| d.id);
-                    if curr_id != prev_id {
-                        if let Some(sel_fn) = &on_select_fn {
-                            let js_val = scene.inspector()
-                                .and_then(|d| {
-                                    let js = crate::editor::JsInspectorData::from(d);
-                                    serde_wasm_bindgen::to_value(&js).ok()
-                                })
-                                .unwrap_or(JsValue::UNDEFINED);
-                            let _ = sel_fn.call1(&JsValue::UNDEFINED, &js_val);
+                    // Selection_changed
+                    let curr_sel_id = scene.inspector().map(|d| d.id);
+                    if curr_sel_id != prev_selection_id {
+                        prev_selection_id = curr_sel_id;
+                        if let Some(cb) = &on_editor_ev_fn {
+                            let data = scene.inspector()
+                                .map(|d| crate::editor::JsInspectorData::from(d));
+                            let ev = WebEditorEvent::SelectionChanged { data };
+                            if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
+                                let _ = cb.call1(&JsValue::UNDEFINED, &js);
+                            }
                         }
                     }
 
@@ -280,9 +265,7 @@ impl WebWindow {
                                     vertra::editor::GizmoMode::Rotate    => "rotate",
                                     vertra::editor::GizmoMode::Scale     => "scale",
                                 };
-                                let ev = WebEditorEvent::GizmoModeChanged {
-                                    mode: mode_str.to_string(),
-                                };
+                                let ev = WebEditorEvent::GizmoModeChanged { mode: mode_str.to_string() };
                                 if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
                                     let _ = cb.call1(&JsValue::UNDEFINED, &js);
                                 }
@@ -356,11 +339,8 @@ impl WebWindow {
                     _ => None,
                 };
 
-                // In editor mode the engine owns all input; the client handler
-                // is intentionally suppressed so editor operations (orbit,
-                // pick, gizmo drag) don't bleed through to game logic.
-                // Once `scene.disable_editor_mode()` is called the block below
-                // becomes active and all events are forwarded as usual.
+                // In editor mode the engine owns all input; client handler is
+                // suppressed until scene.disable_editor_mode() is called.
                 if scene.editor.is_none() {
                     if let (Some(e), Some(f)) = (web_event, &user_event_fn) {
                         if let Ok(js_event_obj) = serde_wasm_bindgen::to_value(&e) {
