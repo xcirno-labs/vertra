@@ -36,7 +36,7 @@ impl Scene {
 
         // Build gizmo overlay for the selected object (if editor is active)
         let overlay_baked = self.editor.as_ref()
-            .and_then(|ed| ed.gizmo_overlay_for_selection(&self.world))
+            .and_then(|ed| ed.gizmo_overlay_for_selection(&self.world, &self.camera))
             .map(|(v, i)| self.pipeline.create_baked_mesh(&v, &i));
 
         // Render: borrow disjoint fields to satisfy the borrow checker
@@ -65,6 +65,15 @@ impl Scene {
         self.editor = Some(ed);
     }
 
+    /// Exit editor mode and switch to **play mode**.
+    ///
+    /// Drops all editor state (selection, gizmos, skybox, pivot).
+    /// After this call `scene.editor` is `None`, the gizmo overlay is hidden,
+    /// and all client-side event handlers begin receiving raw input events again.
+    pub fn disable_editor_mode(&mut self) {
+        self.editor = None;
+    }
+
     /// Feed a platform-agnostic [`EditorEvent`] into the editor.
     ///
     /// In most cases you do not call this manually — `window.rs` converts
@@ -77,7 +86,20 @@ impl Scene {
         }
     }
 
+    /// Feed a platform-agnostic [`EditorEvent`] into the editor.
+    ///
+    /// **Default keybind — `Escape`:** pressing Escape while editor mode is
+    /// active automatically calls [`Self::disable_editor_mode`], switching the
+    /// engine to play mode before any further processing occurs.
     pub fn handle_editor_event(&mut self, event: EditorEvent) {
+        if self.editor.is_none() { return; }
+
+        // Default keybind: Escape exits editor mode -> play mode
+        if matches!(&event, EditorEvent::KeyPressed(winit::keyboard::KeyCode::Escape)) {
+            self.editor = None;
+            return;
+        }
+
         if let Some(ed) = &mut self.editor {
             ed.process(&mut self.camera, &mut self.world, event);
         }

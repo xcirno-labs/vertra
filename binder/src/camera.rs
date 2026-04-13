@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
-use serde::Deserialize;
 use vertra::camera::Camera as CoreCamera;
+use serde::Deserialize;
 
 #[wasm_bindgen]
 extern "C" {
@@ -10,11 +10,9 @@ extern "C" {
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_CAMERA_CONTENT: &'static str = r#"
-/**
- * Configuration options for initializing a new Camera instance.
- */
+/** Configuration options for initialising a new `Camera` instance. */
 export interface JsCameraOptions {
-/** The aspect ratio of the viewport (width / height). */
+    /** The aspect ratio of the viewport (`width / height`). */
     aspect?: number;
     /** Vertical field of view in degrees. */
     fov?: number;
@@ -24,9 +22,9 @@ export interface JsCameraOptions {
     zfar?: number;
     /** Initial left-right (yaw) rotation in degrees. */
     lr_rot?: number;
-    /** Initial up-down (pitch) rotation in degress. */
+    /** Initial up-down (pitch) rotation in degrees. */
     ud_rot?: number;
-    /** The initial [x, y, z] position of the camera in world space. */
+    /** Initial world-space position as `[x, y, z]`. */
     position?: [number, number, number];
 }
 "#;
@@ -42,8 +40,10 @@ pub struct CameraConstructorOptions {
     pub position: Option<[f32; 3]>,
 }
 
-/// A 3D camera controller for navigating world space.
-/// Manages projection matrices, position, and orientation.
+/// A 3D camera that controls the viewpoint and projection used to render the scene.
+///
+/// Manages the view and projection matrices, world-space position, and look direction.
+/// The engine owns one camera per [`Scene`]; obtain it via [`Scene::camera`].
 #[wasm_bindgen]
 pub struct Camera {
     #[wasm_bindgen(skip)]
@@ -54,8 +54,14 @@ pub struct Camera {
 
 #[wasm_bindgen]
 impl Camera {
-    /// Creates a new Camera instance.
-    /// @param {JsCameraOptions} options - Initial configuration for the camera.
+    /// Creates a new `Camera` from optional configuration values.
+    ///
+    /// Any omitted fields fall back to engine defaults (aspect `1.0`, fov `45°`,
+    /// znear `0.1`, zfar `1000.0`).
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - A [`JsCameraOptions`] object; all fields are optional.
     #[wasm_bindgen(constructor)]
     pub fn new(options: JsCameraOptions) -> Self {
         let mut camera = Box::new(CoreCamera::new());
@@ -68,12 +74,10 @@ impl Camera {
                 if let Some(zn) = opts.znear { camera.znear = zn; }
                 if let Some(zf) = opts.zfar { camera.zfar = zf; }
 
-                // Handle rotation
                 if let (Some(lr), Some(ud)) = (opts.lr_rot, opts.ud_rot) {
                     *camera = camera.with_rotation(lr, ud);
                 }
 
-                // New: Handle position directly in constructor
                 if let Some(pos) = opts.position {
                     camera.eye = pos;
                 }
@@ -83,28 +87,47 @@ impl Camera {
         Self { inner: Box::into_raw(camera), owned: true }
     }
 
-    /// Updates the aspect ratio of the camera.
-    /// Typically called when the window or canvas is resized.
-    /// @param {number} aspect - The aspect ratio in decimal.
+    /// Updates the aspect ratio used by the projection matrix.
+    ///
+    /// Call this whenever the canvas or window is resized so that the projection
+    /// stays geometrically correct.
+    ///
+    /// # Arguments
+    ///
+    /// * `aspect` - The new aspect ratio (`viewport_width / viewport_height`).
     pub fn set_aspect(&mut self, aspect: f32) {
         unsafe {
             (*self.inner).aspect = aspect;
         }
     }
 
-    /// Rotates the camera based on screen-space movement deltas.
-    /// @param {number} dx - Relative mouse movement on the X axis.
-    /// @param {number} dy - Relative mouse movement on the Y axis.
-    /// @param {boolean} inverted - Whether to invert the vertical look axis.
+    /// Rotates the camera by applying yaw and pitch deltas.
+    ///
+    /// Typically called with the raw `movementX` / `movementY` values from a
+    /// browser `mousemove` event.
+    ///
+    /// # Arguments
+    ///
+    /// * `dx`       - Horizontal mouse delta in pixels (positive = look right).
+    /// * `dy`       - Vertical mouse delta in pixels (positive = look down).
+    /// * `inverted` - When `true` the pitch direction is flipped (inverted Y).
     pub fn rotate(&mut self, dx: f32, dy: f32, inverted: bool) {
         unsafe {
             (*self.inner).rotate(dx, dy, inverted);
         }
     }
 
-    /// Moves the camera in a specific 3D direction.
-    /// @param {Float32Array | number[]} direction - A 3-element array representing the direction vector.
-    /// @param {number} amount - The distance to move.
+    /// Moves the camera along an arbitrary world-space direction vector.
+    ///
+    /// # Arguments
+    ///
+    /// * `direction` - A 3-element `[x, y, z]` direction vector.
+    ///   Does not need to be normalised.
+    /// * `amount` - Distance to travel in world units.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`JsError`] when `direction` does not contain exactly 3 elements.
     pub fn move_by(&mut self, direction: Vec<f32>, amount: f32) -> Result<(), JsError> {
         if direction.len() != 3 {
             return Err(JsError::new("Direction must be an array of 3 numbers"));
@@ -118,11 +141,18 @@ impl Camera {
         Ok(())
     }
 
-    /// Processes keyboard input to move the camera.
-    /// Recognizes WASD and Arrow keys.
-    /// @param {string[]} pressed_keys - An array of active key strings (e.g., from KeyboardEvent.code).
-    /// @param {number} speed - Movement units per second.
-    /// @param {number} dt - Delta time since the last frame in seconds.
+    /// Moves the camera using keyboard input from a set of currently-held keys.
+    ///
+    /// Recognises WASD and Arrow key codes as returned by `KeyboardEvent.code`.
+    /// This is a convenience helper for play-mode first-person navigation;
+    /// the editor uses its own internal WASD handler.
+    ///
+    /// # Arguments
+    ///
+    /// * `pressed_keys` - Slice of active key-code strings
+    ///   (e.g. `["KeyW", "ShiftLeft"]`).
+    /// * `speed` - Movement speed in world units per second.
+    /// * `dt`    - Delta time since the last frame, in seconds.
     pub fn handle_input_default(&mut self, pressed_keys: Vec<String>, speed: f32, dt: f32) {
         unsafe {
             let (f, r) = (*self.inner).get_directions();

@@ -12,15 +12,14 @@ extern "C" {
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_OBJECT_CONTENT: &'static str = r#"
-/**
- * Configuration options for initializing a new VertraObject.
- */
+/** Configuration options for initialising a new `VertraObject`. */
 export interface JsObjectOptions {
-    /** * A unique string identifier. If provided, this will be used for World lookups.
-     * If omitted, a random UUID will be generated automatically.
+    /**
+     * A stable string identifier used for world lookups via `World.get_id`.
+     * If omitted, a random UUID is generated automatically.
      */
     str_id?: string;
-    /** The initial color of the object [r, g, b, a]. */
+    /** Initial RGBA colour of the object as `[r, g, b, a]` in the range `0.0–1.0`. */
     color?: [number, number, number, number];
 }
 "#;
@@ -32,7 +31,10 @@ struct InternalObjectOptions {
 }
 
 /// Represents a node in the 3D scene graph.
-/// Objects hold a name, a transform (position/rotation/scale), and optional geometry/color data.
+///
+/// Objects hold a name, a [`Transform`] (position / rotation / scale), and
+/// optional geometry and colour data.  Spawn them into a scene with
+/// [`Scene::spawn`] or [`World::spawn_object`].
 #[wasm_bindgen(js_name = VertraObject)]
 pub struct Object {
     #[wasm_bindgen(skip)]
@@ -43,9 +45,16 @@ pub struct Object {
 
 #[wasm_bindgen(js_name = VertraObject)]
 impl Object {
-    /// Creates a new scene object.
-    /// @param {string} name - The display name.
-    /// @param {JsObjectOptions} [options] - Initial configuration (str_id, color, etc).
+    /// Creates a new scene object template.
+    ///
+    /// The object is not yet part of any scene; call [`Scene::spawn`] or
+    /// [`World::spawn_object`] to add it to the world.
+    ///
+    /// # Arguments
+    ///
+    /// * `name`    - Human-readable display name shown in the inspector.
+    /// * `options` - Optional [`JsObjectOptions`] with `str_id` and/or `color`.
+    ///   Pass `undefined` or `null` to use defaults (random UUID, white colour).
     #[wasm_bindgen(constructor)]
     pub fn new(name: String, options: Option<JsValue>) -> Self {
         let opts: InternalObjectOptions = options
@@ -71,27 +80,31 @@ impl Object {
             owned: true,
         }
     }
-    /// Sets the name of the object.
+
+    /// Sets the display name of the object.
     #[wasm_bindgen(setter)]
     pub fn set_name(&mut self, name: String) {
-        unsafe {(*self.inner).name = name}
+        unsafe { (*self.inner).name = name }
     }
 
-    /// Gets the current name of the object.
+    /// Returns the current display name of the object.
     #[wasm_bindgen(getter)]
     pub fn name(&self) -> String {
         unsafe { (*self.inner).name.clone() }
     }
 
-    /// Updates the object's spatial properties (position, rotation, scale).
-    /// This mutates the underlying core object referenced by `inner`.
-    /// For objects returned from `World::get_object`, that updates the World-backed object;
-    /// for JS-owned objects created via `new`, it updates the boxed standalone template object.
-    /// @param {Transform} transform - The new transform state.
+    /// Updates the object's spatial properties (position, rotation, and scale).
+    ///
+    /// For objects fetched from the world via [`World::get_object`] this mutates
+    /// the live world-backed data.  For JS-owned objects created with `new` it
+    /// mutates the standalone template before it is spawned.
+    ///
+    /// # Arguments
+    ///
+    /// * `transform` - The new transform state to apply.
     #[wasm_bindgen(setter)]
     pub fn set_transform(&mut self, transform: &Transform) {
         unsafe {
-            // Mutate the underlying core object in place; this may be World-backed or JS-owned
             (*self.inner).transform = transform.inner.clone();
         }
     }
@@ -104,8 +117,12 @@ impl Object {
         }
     }
 
-    /// Sets the RGBA color of the object.
-    /// @param {Float32Array | number[]} color - An array of 4 numbers [r, g, b, a] ranging from 0.0 to 1.0.
+    /// Sets the RGBA colour of the object.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - A 4-element `[r, g, b, a]` array with values in `0.0 ..= 1.0`.
+    ///   Silently ignored when the slice does not contain exactly 4 elements.
     pub fn set_color(&mut self, color: Vec<f32>) {
         unsafe {
             if color.len() == 4 {
@@ -115,23 +132,26 @@ impl Object {
     }
 
     /// Attaches a mesh geometry to this object for rendering.
-    /// @param {Geometry} geometry - The geometry to be applied.
+    ///
+    /// # Arguments
+    ///
+    /// * `geometry` - The geometry variant to attach (cube, sphere, plane, etc.).
     pub fn set_geometry(&mut self, geometry: &Geometry) {
         unsafe {
             (*self.inner).geometry = Some(geometry.inner.clone());
         }
     }
 
-    /// Returns the ID of the parent object, if one exists.
+    /// Returns the integer ID of the parent object, or `undefined` if this is a root object.
     #[wasm_bindgen(getter)]
     pub fn parent(&self) -> Option<usize> {
-        unsafe {
-            (*self.inner).parent
-        }
+        unsafe { (*self.inner).parent }
     }
 
-    /// Returns the unique string identifier for this object.
-    /// This is assigned at creation and cannot be changed.
+    /// Returns the stable string identifier assigned at creation time.
+    ///
+    /// This value cannot be changed after construction.  Use it with
+    /// [`World::get_id`] to resolve back to the integer ID at runtime.
     #[wasm_bindgen(getter)]
     pub fn str_id(&self) -> String {
         unsafe { (*self.inner).str_id.clone() }
@@ -140,9 +160,7 @@ impl Object {
     /// Returns the number of direct children attached to this object.
     #[wasm_bindgen(getter)]
     pub fn children_count(&self) -> usize {
-        unsafe {
-            (*self.inner).children.len()
-        }
+        unsafe { (*self.inner).children.len() }
     }
 }
 

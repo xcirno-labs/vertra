@@ -8,6 +8,7 @@ use serde::Serialize;
 use winit::event::{MouseButton, MouseScrollDelta};
 use vertra::editor::EditorEvent;
 use crate::camera::Camera;
+use crate::editor::WebEditorEvent;
 
 #[wasm_bindgen(start)]
 pub fn main_js() {
@@ -52,6 +53,7 @@ pub struct WebWindow {
     on_draw_request: Option<Function>,
     on_startup: Option<Function>,
     on_select: Option<Function>,
+    on_editor_event: Option<Function>,
     with_event_handler: Option<Function>,
 }
 
@@ -70,6 +72,7 @@ impl WebWindow {
             on_draw_request: None,
             on_startup: None,
             on_select: None,
+            on_editor_event: None,
             with_event_handler: None,
         }
     }
@@ -96,6 +99,24 @@ impl WebWindow {
     /// Callback signature: `(data: InspectorData | undefined) => void`
     /// `data` is `undefined` when the selection is cleared.
     pub fn on_select(&mut self, f: Function) { self.on_select = Some(f); }
+
+    /// Registers a callback fired when editor state changes that are relevant
+    /// to the scene editor UI (gizmo mode switches, drag start/end).
+    ///
+    /// The callback receives a single [`EditorEventType`] object.
+    ///
+    /// # Example
+    ///
+    /// ```ts
+    /// window.on_editor_event(ev => {
+    ///   if (ev.type === "gizmo_mode_changed") setActiveGizmo(ev.mode);
+    ///   if (ev.type === "drag_start")  console.log("dragging", ev.axis);
+    ///   if (ev.type === "drag_end")    console.log("drag released");
+    /// });
+    /// ```
+    ///
+    /// Callback signature: `(event: EditorEventType) => void`
+    pub fn on_editor_event(&mut self, f: Function) { self.on_editor_event = Some(f); }
 
     /// Initializes the engine and starts the RequestAnimationFrame loop.
     /// @param {string} canvas_id - The ID of the HTMLCanvasElement to target.
@@ -156,8 +177,23 @@ impl WebWindow {
             });
         }
 
-        if let Some(f) = self.with_event_handler {
-            let on_select_fn = self.on_select.clone();
+        // Register a combined event handler whenever any of the three
+        // event-driven callbacks is set.  This decouples on_select and
+        // on_editor_event from requiring with_event_handler to be set.
+        let needs_event_handler = self.with_event_handler.is_some()
+            || self.on_select.is_some()
+            || self.on_editor_event.is_some();
+
+        if needs_event_handler {
+            let on_select_fn      = self.on_select.clone();
+            let on_editor_ev_fn   = self.on_editor_event.clone();
+            let user_event_fn     = self.with_event_handler;
+
+            // State tracking for on_editor_event – captured by value into the
+            // FnMut closure so they persist across frames.
+            let mut prev_gizmo_mode  = vertra::editor::GizmoMode::Translate;
+            let mut prev_is_dragging = false;
+
             engine_window = engine_window.with_event_handler(move |state, scene, event, _elwt| {
 
                 if scene.editor.is_some() {
@@ -182,15 +218,26 @@ impl WebWindow {
                                 Some(EditorEvent::Scroll { delta: scroll })
                             }
                             WindowEvent::ModifiersChanged(mods) => {
-                                Some(EditorEvent::ModifiersChanged { alt: mods.state().alt_key() })
+                                let s = mods.state();
+                                Some(EditorEvent::ModifiersChanged {
+                                    alt:  s.alt_key(),
+                                    ctrl: s.control_key(),
+                                })
                             }
-                            WindowEvent::KeyboardInput { event: ke, .. }
-                                if ke.state == ElementState::Pressed =>
-                            {
+                            WindowEvent::KeyboardInput { event: ke, .. } => {
                                 use vertra::event::PhysicalKey;
                                 use winit::keyboard::KeyCode;
-                                if let PhysicalKey::Code(KeyCode::KeyF) = ke.physical_key {
-                                    Some(EditorEvent::FocusKey)
+                                if let PhysicalKey::Code(code) = ke.physical_key {
+                                    let ev = match ke.state {
+                                        ElementState::Pressed  => EditorEvent::KeyPressed(code),
+                                        ElementState::Released => EditorEvent::KeyReleased(code),
+                                    };
+                                    if ke.state == ElementState::Pressed && code == KeyCode::KeyF {
+                                        scene.handle_editor_event(EditorEvent::KeyPressed(code));
+                                        Some(EditorEvent::FocusKey)
+                                    } else {
+                                        Some(ev)
+                                    }
                                 } else { None }
                             }
                             _ => None,
@@ -209,7 +256,7 @@ impl WebWindow {
                         scene.handle_editor_event(e);
                     }
 
-                    // Fire on_select when the selection changes
+                    // ── on_select: fire when selection changes ────────────────
                     let curr_id = scene.inspector().map(|d| d.id);
                     if curr_id != prev_id {
                         if let Some(sel_fn) = &on_select_fn {
@@ -221,6 +268,51 @@ impl WebWindow {
                                 .unwrap_or(JsValue::UNDEFINED);
                             let _ = sel_fn.call1(&JsValue::UNDEFINED, &js_val);
                         }
+                    }
+
+                    if let Some(ed) = &scene.editor {
+                        let curr_mode = ed.gizmo_mode;
+                        if curr_mode != prev_gizmo_mode {
+                            prev_gizmo_mode = curr_mode;
+                            if let Some(cb) = &on_editor_ev_fn {
+                                let mode_str = match curr_mode {
+                                    vertra::editor::GizmoMode::Translate => "translate",
+                                    vertra::editor::GizmoMode::Rotate    => "rotate",
+                                    vertra::editor::GizmoMode::Scale     => "scale",
+                                };
+                                let ev = WebEditorEvent::GizmoModeChanged {
+                                    mode: mode_str.to_string(),
+                                };
+                                if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
+                                    let _ = cb.call1(&JsValue::UNDEFINED, &js);
+                                }
+                            }
+                        }
+
+                        let curr_dragging = ed.drag.is_some();
+                        if curr_dragging != prev_is_dragging {
+                            prev_is_dragging = curr_dragging;
+                            if let Some(cb) = &on_editor_ev_fn {
+                                let web_ev = if curr_dragging {
+                                    let axis_str = match ed.drag.as_ref().map(|d| d.axis) {
+                                        Some(vertra::editor::DragAxis::X) => "x",
+                                        Some(vertra::editor::DragAxis::Y) => "y",
+                                        Some(vertra::editor::DragAxis::Z) => "z",
+                                        None => "x",
+                                    };
+                                    WebEditorEvent::DragStart { axis: axis_str.to_string() }
+                                } else {
+                                    WebEditorEvent::DragEnd
+                                };
+                                if let Ok(js) = serde_wasm_bindgen::to_value(&web_ev) {
+                                    let _ = cb.call1(&JsValue::UNDEFINED, &js);
+                                }
+                            }
+                        }
+                    } else {
+                        // Editor was deactivated (e.g. Escape); reset tracking state.
+                        prev_gizmo_mode  = vertra::editor::GizmoMode::Translate;
+                        prev_is_dragging = false;
                     }
                 }
 
@@ -264,14 +356,21 @@ impl WebWindow {
                     _ => None,
                 };
 
-                if let Some(e) = web_event {
-                    if let Ok(js_event_obj) = serde_wasm_bindgen::to_value(&e) {
-                        let _ = f.call3(
-                            &JsValue::UNDEFINED,
-                            state,
-                            &JsValue::from(unsafe { wrap_scene(scene) }),
-                            &js_event_obj,
-                        );
+                // In editor mode the engine owns all input; the client handler
+                // is intentionally suppressed so editor operations (orbit,
+                // pick, gizmo drag) don't bleed through to game logic.
+                // Once `scene.disable_editor_mode()` is called the block below
+                // becomes active and all events are forwarded as usual.
+                if scene.editor.is_none() {
+                    if let (Some(e), Some(f)) = (web_event, &user_event_fn) {
+                        if let Ok(js_event_obj) = serde_wasm_bindgen::to_value(&e) {
+                            let _ = f.call3(
+                                &JsValue::UNDEFINED,
+                                state,
+                                &JsValue::from(unsafe { wrap_scene(scene) }),
+                                &js_event_obj,
+                            );
+                        }
                     }
                 }
             });
