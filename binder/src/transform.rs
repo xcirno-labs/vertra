@@ -10,14 +10,19 @@ extern "C" {
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_APPEND_CONTENT: &'static str = r#"
+/** Spatial configuration passed to the `Transform` constructor. */
 export interface TransformOptions {
+    /** World-space position as `[x, y, z]`. Defaults to `[0, 0, 0]`. */
     position?: [number, number, number];
+    /** Euler rotation in degrees as `[rx, ry, rz]`. Defaults to `[0, 0, 0]`. */
     rotation?: [number, number, number];
+    /** Per-axis scale factors as `[sx, sy, sz]`. Defaults to `[1, 1, 1]`. */
     scale?: [number, number, number];
 }
 "#;
 
-/// Manages spatial data including position, rotation, and scale.
+/// Manages the spatial state of a scene object: position, rotation, and scale.
+///
 /// Used to calculate local-to-world matrices and hierarchy transformations.
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize, Clone)]
@@ -36,8 +41,15 @@ pub struct TransformConstructorOptions {
 
 #[wasm_bindgen]
 impl Transform {
-    /// Creates a new Transform.
-    /// @param {ITransformOptions} options - Initial spatial values.
+    /// Creates a new `Transform` with optional initial spatial values.
+    ///
+    /// Any omitted fields fall back to their defaults: zero position,
+    /// zero rotation, and unit scale `[1, 1, 1]`.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - A [`TransformOptions`] object with optional `position`,
+    ///   `rotation`, and `scale` fields.
     #[wasm_bindgen(constructor)]
     pub fn new(options: JsTransformOptions) -> Self {
         let mut inner = CoreTransform::default();
@@ -55,13 +67,15 @@ impl Transform {
         Self { inner }
     }
 
-    /// Returns the [x, y, z] position.
+    /// Returns the world-space position as `[x, y, z]`.
     #[wasm_bindgen(getter)]
     pub fn position(&self) -> Vec<f32> {
         self.inner.position.to_vec()
     }
 
-    /// Sets the position. Expects a 3-element array.
+    /// Sets the position from a 3-element array.
+    ///
+    /// Silently ignored when the slice does not contain exactly 3 elements.
     #[wasm_bindgen(setter)]
     pub fn set_position(&mut self, val: Vec<f32>) {
         if val.len() == 3 {
@@ -69,13 +83,15 @@ impl Transform {
         }
     }
 
-    /// Returns the [x, y, z] Euler rotation.
+    /// Returns the Euler rotation as `[rx, ry, rz]` in degrees.
     #[wasm_bindgen(getter)]
     pub fn rotation(&self) -> Vec<f32> {
         self.inner.rotation.to_vec()
     }
 
-    /// Sets the rotation. Expects a 3-element array of Euler angles (degrees).
+    /// Sets the rotation from a 3-element array of Euler angles in degrees.
+    ///
+    /// Silently ignored when the slice does not contain exactly 3 elements.
     #[wasm_bindgen(setter)]
     pub fn set_rotation(&mut self, val: Vec<f32>) {
         if val.len() == 3 {
@@ -83,13 +99,15 @@ impl Transform {
         }
     }
 
-    /// Returns the [x, y, z] scale factors.
+    /// Returns the per-axis scale factors as `[sx, sy, sz]`.
     #[wasm_bindgen(getter)]
     pub fn scale(&self) -> Vec<f32> {
         self.inner.scale.to_vec()
     }
 
-    /// Sets the scale. Expects a 3-element array.
+    /// Sets the scale from a 3-element array.
+    ///
+    /// Silently ignored when the slice does not contain exactly 3 elements.
     #[wasm_bindgen(setter)]
     pub fn set_scale(&mut self, val: Vec<f32>) {
         if val.len() == 3 {
@@ -97,11 +115,19 @@ impl Transform {
         }
     }
 
-    /// Combines this transform with a child transform, returning a new local-to-world result.
-    /// Useful for calculating the absolute position of a nested object.
-    /// @param {Transform} child - The local transform to apply to this parent transform.
+    /// Composes this transform with a child transform, returning a new world-space result.
+    ///
+    /// Useful for computing the absolute position of a nested object given its
+    /// local transform relative to a parent.
+    ///
+    /// # Arguments
+    ///
+    /// * `child` - The local-space transform to apply on top of this parent transform.
+    ///
+    /// # Returns
+    ///
+    /// A new [`Transform`] representing the composed world-space transformation.
     pub fn combine_wasm(&self, child: &Transform) -> Transform {
-        // Since CoreTransform implements Clone, we can just use the inner value
         let combined = self.inner.combine(&child.inner);
         Self { inner: combined }
     }

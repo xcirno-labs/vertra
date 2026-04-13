@@ -5,3 +5,4 @@ mod geometry;
 mod world;
 mod transform;
 mod scene;
+pub mod editor;
