@@ -8,7 +8,7 @@ edition = "2024"
 
 [dependencies]
 winit = "0.29"
-wgpu = "29.0.1"
+wgpu = { version = "29.0.1", features = ["webgl"] }
 pollster = "0.3"
 bytemuck = { version = "1.14", features = ["derive"] }
 wasm-bindgen-futures = "0.4.67"

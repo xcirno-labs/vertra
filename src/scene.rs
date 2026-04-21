@@ -1,4 +1,5 @@
 use crate::camera::Camera;
+use crate::editor::{EditorEvent, EditorState, InspectorData};
 use crate::mesh::{MeshRegistry};
 use crate::pipeline::Pipeline;
 use crate::world::World;
@@ -7,10 +8,13 @@ use crate::transform::Transform;
 use crate::vtr::{self, VtrError};
 
 pub struct Scene {
-    pub pipeline: Pipeline,
-    pub mesh_registry: MeshRegistry,
-    pub camera: Camera,
-    pub world: World
+    pub pipeline:       Pipeline,
+    pub mesh_registry:  MeshRegistry,
+    pub camera:         Camera,
+    pub world:          World,
+    /// When `Some`, the engine runs in static editor mode.
+    /// Attach with [`Scene::enable_editor_mode`].
+    pub editor:         Option<EditorState>,
 }
 
 impl Scene {
@@ -23,16 +27,88 @@ impl Scene {
         let identity = Transform::default();
 
         // Flatten the entire world hierarchy into vertices
-        // This visits every Object and combines their Transforms
         for &root_id in &self.world.roots {
             mesh_data.add_object(&self.world, root_id, &identity);
         }
 
-        // Bake this frame's geometry to the GPU
-        // TODO: Reuse buffers instead of creating new ones
+        // Bake world geometry to the GPU
         let world_baked = mesh_data.bake(&self.pipeline);
 
-        self.pipeline.render_baked_mesh(&world_baked, &self.camera);
+        // Build gizmo overlay for the selected object (if editor is active)
+        let overlay_baked = self.editor.as_ref()
+            .and_then(|ed| ed.gizmo_overlay_for_selection(&self.world, &self.camera))
+            .map(|(v, i)| self.pipeline.create_baked_mesh(&v, &i));
+
+        // Render: borrow disjoint fields to satisfy the borrow checker
+        let camera  = &self.camera;
+        let skybox  = self.editor.as_ref().and_then(|ed| ed.skybox.as_ref());
+        self.pipeline.render_scene(camera, &world_baked, skybox, overlay_baked.as_ref());
+    }
+
+    /// Switch into static editor mode.
+    ///
+    /// Spawns the X/Y/Z axis gizmos at the world origin and initialises the
+    /// orbit pivot in front of the camera.  Call once from `on_startup`.
+    pub fn enable_editor_mode(&mut self) {
+        let w = self.pipeline.surface_config.width  as f32;
+        let h = self.pipeline.surface_config.height as f32;
+        let mut ed = EditorState::new(w, h);
+        ed.spawn_gizmos(&mut self.world);
+
+        // Bake the skybox once and store it
+        let (sky_v, sky_i) = crate::editor::build_skybox_mesh();
+        ed.skybox = Some(self.pipeline.create_baked_mesh(&sky_v, &sky_i));
+
+        // Place pivot at the camera's current look-at target
+        ed.pivot = self.camera.target;
+
+        self.editor = Some(ed);
+    }
+
+    /// Exit editor mode and switch to **play mode**.
+    ///
+    /// Drops all editor state (selection, gizmos, skybox, pivot).
+    /// After this call `scene.editor` is `None`, the gizmo overlay is hidden,
+    /// and all client-side event handlers begin receiving raw input events again.
+    pub fn disable_editor_mode(&mut self) {
+        self.editor = None;
+    }
+
+    /// Feed a platform-agnostic [`EditorEvent`] into the editor.
+    ///
+    /// In most cases you do not call this manually — `window.rs` converts
+    /// winit events and calls this automatically when editor mode is active.
+    /// Advance per-frame editor logic (WASD camera movement).
+    /// Called automatically by the window loop every frame when editor mode is active.
+    pub fn update_editor(&mut self, dt: f32) {
+        if let Some(ed) = &mut self.editor {
+            ed.update(&mut self.camera, dt);
+        }
+    }
+
+    /// Feed a platform-agnostic [`EditorEvent`] into the editor.
+    ///
+    /// **Default keybind — `Escape`:** pressing Escape while editor mode is
+    /// active automatically calls [`Self::disable_editor_mode`], switching the
+    /// engine to play mode before any further processing occurs.
+    pub fn handle_editor_event(&mut self, event: EditorEvent) {
+        if self.editor.is_none() { return; }
+
+        // Default keybind: Escape exits editor mode -> play mode
+        if matches!(&event, EditorEvent::KeyPressed(winit::keyboard::KeyCode::Escape)) {
+            self.editor = None;
+            return;
+        }
+
+        if let Some(ed) = &mut self.editor {
+            ed.process(&mut self.camera, &mut self.world, event);
+        }
+    }
+
+    /// Returns a reference to the currently-selected object's inspector data,
+    /// or `None` if nothing is selected or editor mode is inactive.
+    pub fn inspector(&self) -> Option<&InspectorData> {
+        self.editor.as_ref()?.inspector.selected.as_ref()
     }
 
     /// Serialize the current camera and world to a `.vtr` binary file.
@@ -56,7 +132,7 @@ impl Scene {
     pub fn load_vtr_file(&mut self, path: &std::path::Path) -> Result<(), VtrError> {
         let data = vtr::read_from_file(path)?;
         self.camera = data.camera;
-        self.world = data.world;
+        self.world  = data.world;
         Ok(())
     }
 }
