@@ -42,6 +42,17 @@ const VERTEX_ATTRS: [wgpu::VertexAttribute; 2] = [
 
 impl Pipeline {
     pub async fn initialize(window: Arc<winit::window::Window>) -> Self {
+        // On WASM inside any bundled environment the WebGPU
+        // backend's instanceof GPUCanvasContext check fails due to a JS
+        // realm mismatch, causing a panic. Force WebGL2 on wasm32 to avoid
+        // this until wgpu ships a proper fix.
+        let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+        desc.backends = wgpu::Backends::GL;
+
+        #[cfg(target_arch = "wasm32")]
+        let instance = wgpu::Instance::new(desc);
+
+        #[cfg(not(target_arch = "wasm32"))]
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(Arc::clone(&window)).unwrap();
         let adapter = instance.request_adapter(
@@ -52,12 +63,29 @@ impl Pipeline {
             },
         ).await.expect("Failed to find an appropriate adapter");
 
+        // Get the limits actually supported by this specific hardware
+        let adapter_limits = adapter.limits();
+
         let (device, queue) = adapter.request_device(
-            &wgpu::DeviceDescriptor::default(),
+            &wgpu::DeviceDescriptor {
+                label: None,
+                required_limits: wgpu::Limits {
+                    ..adapter_limits
+                },
+                required_features: wgpu::Features::empty(),
+                memory_hints: Default::default(),
+                trace: wgpu::Trace::Off,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+            },
         ).await.expect("Failed to create device");
 
         let size = window.inner_size();
-        let surface_config = surface.get_default_config(&adapter, size.width, size.height).unwrap();
+        let width = if size.width > 0 { size.width } else { crate::constants::window::DEFAULT_WIDTH };
+        let height = if size.height > 0 { size.height } else { crate::constants::window::DEFAULT_HEIGHT };
+        let surface_config = surface
+            .get_default_config(&adapter, width, height)
+            .expect("Surface not supported by adapter");
+
         surface.configure(&device, &surface_config);
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
