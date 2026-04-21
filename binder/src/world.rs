@@ -33,7 +33,7 @@ impl World {
 
     /// Removes an object and all of its descendants from the world.
     ///
-    /// Any integer IDs or [`VertraObject`] references held in JavaScript that
+    /// Any integer IDs or [`Object`] references held in JavaScript that
     /// point to the deleted object or its children become dangling after this
     /// call; do not use them for further world queries.
     ///
@@ -48,7 +48,7 @@ impl World {
 
     /// Retrieves a live reference to an object by its integer ID.
     ///
-    /// The returned [`VertraObject`] is **owned by the world** — do not manually
+    /// The returned [`Object`] is **owned by the world** — do not manually
     /// destroy it on the JS side, and do not retain it across calls to
     /// [`World::delete`] with the same ID.
     ///

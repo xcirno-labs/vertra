@@ -87,8 +87,12 @@ impl WebWindow {
     /// Callback signature: (state, scene, frameContext) => void
     pub fn on_draw_request(&mut self, f: Function) { self.on_draw_request = Some(f); }
 
-    /// Registers a handler for input events (keyboard/mouse).
+    /// Registers a handler for raw input events (keyboard/mouse).
+    ///
     /// Callback signature: (state, scene, event) => void
+    ///
+    /// Note: while editor mode is active, these raw input callbacks are paused.
+    /// Use [`Self::on_editor_event`] to observe editor interactions and state changes instead.
     pub fn with_event_handler(&mut self, f: Function) { self.with_event_handler = Some(f); }
 
     /// Registers a callback fired when editor state changes.
@@ -161,9 +165,9 @@ impl WebWindow {
             });
         }
 
-        // Register a combined event handler whenever any of the three
-        // event-driven callbacks is set.  This decouples on_select and
-        // on_editor_event from requiring with_event_handler to be set.
+        // Register a combined event handler whenever either event callback
+        // is set. This lets on_editor_event receive editor events without
+        // requiring with_event_handler to be set by the caller.
         let needs_event_handler = self.with_event_handler.is_some()
             || self.on_editor_event.is_some();
 

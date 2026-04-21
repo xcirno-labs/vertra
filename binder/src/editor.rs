@@ -1,4 +1,4 @@
-﻿use wasm_bindgen::prelude::*;
+use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 use vertra::editor::InspectorData as CoreInspectorData;
 use vertra::editor::EditorEvent;
