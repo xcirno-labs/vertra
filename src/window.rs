@@ -169,9 +169,10 @@ impl<S> Window<S> {
     /// Register a callback for high-level editor state-change events.
     ///
     /// Fired *after* the editor has processed input and its state has actually
-    /// changed.  Possible variants:
+    /// changed. Possible variants:
     ///
     /// * [`EditorStateEvent::GizmoModeChanged`] — T / R / E switched the gizmo mode.
+    /// * [`EditorStateEvent::SelectionChanged`] — the editor selection changed.
     /// * [`EditorStateEvent::DragStart`] — user began dragging a gizmo axis handle.
     /// * [`EditorStateEvent::DragEnd`] — user released a gizmo axis drag.
     ///
