@@ -52,12 +52,12 @@ impl Geometry {
                 let p8 = [-w,  h, -d]; // Back-Top-Left
 
                 // Note: Winding order matters for culling!
-                mesh_data.add_transformed_quad([p1, p2, p3, p4], transform, color); // Front
-                mesh_data.add_transformed_quad([p6, p5, p8, p7], transform, color); // Back
-                mesh_data.add_transformed_quad([p5, p1, p4, p8], transform, color); // Left
-                mesh_data.add_transformed_quad([p2, p6, p7, p3], transform, color); // Right
-                mesh_data.add_transformed_quad([p4, p3, p7, p8], transform, color); // Top
-                mesh_data.add_transformed_quad([p5, p6, p2, p1], transform, color); // Bottom
+                mesh_data.add_transformed_quad([p1, p4, p3, p2], transform, color); // Front
+                mesh_data.add_transformed_quad([p6, p7, p8, p5], transform, color); // Back
+                mesh_data.add_transformed_quad([p5, p8, p4, p1], transform, color); // Left
+                mesh_data.add_transformed_quad([p2, p3, p7, p6], transform, color); // Right
+                mesh_data.add_transformed_quad([p4, p8, p7, p3], transform, color); // Top
+                mesh_data.add_transformed_quad([p5, p1, p2, p6], transform, color); // Bottom
             }
             Geometry::Plane { size } => {
                 let s = size * 0.5;

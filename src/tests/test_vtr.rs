@@ -1021,3 +1021,138 @@ fn str_id_unicode_handles() {
     assert_eq!(data.world.get_id(&unicode_id).is_some(), true);
 }
 
+// --- texture_path roundtrip tests ---
+#[test]
+fn texture_path_some_roundtrip() {
+    let path = "assets/textures/stone.png".to_string();
+    let mut world = World::new();
+    let id = world.spawn_object(
+        Object {
+            name: "Textured".to_string(),
+            texture_path: Some(path.clone()),
+            ..Object::default()
+        },
+        None,
+    );
+
+    let data = roundtrip(&test_camera(), &world);
+    assert_eq!(
+        data.world.objects[&id].texture_path,
+        Some(path),
+        "texture_path should survive a VTR roundtrip"
+    );
+}
+
+#[test]
+fn texture_path_none_roundtrip() {
+    // Explicit None should still be None after roundtrip.
+    let mut world = World::new();
+    let id = world.spawn_object(
+        Object { texture_path: None, ..Object::default() },
+        None,
+    );
+
+    let data = roundtrip(&test_camera(), &world);
+    assert_eq!(
+        data.world.objects[&id].texture_path,
+        None,
+        "absent texture_path should remain None"
+    );
+}
+
+#[test]
+fn texture_path_unicode_roundtrip() {
+    // Unicode (multi-byte) texture path must be preserved exactly.
+    let path = "资源/纹理/石头_🪨.png".to_string();
+    let mut world = World::new();
+    let id = world.spawn_object(
+        Object {
+            name: "Unicode Tex".to_string(),
+            texture_path: Some(path.clone()),
+            ..Object::default()
+        },
+        None,
+    );
+
+    let data = roundtrip(&test_camera(), &world);
+    assert_eq!(
+        data.world.objects[&id].texture_path,
+        Some(path),
+        "unicode texture_path must survive a VTR roundtrip"
+    );
+}
+
+#[test]
+fn texture_path_max_valid_length_roundtrip() {
+    // A path that is exactly u16::MAX bytes long must round-trip without error.
+    let path = "x".repeat(u16::MAX as usize);
+    let mut world = World::new();
+    let id = world.spawn_object(
+        Object {
+            texture_path: Some(path.clone()),
+            ..Object::default()
+        },
+        None,
+    );
+
+    let data = roundtrip(&test_camera(), &world);
+    assert_eq!(
+        data.world.objects[&id].texture_path.as_deref().map(|s| s.len()),
+        Some(u16::MAX as usize),
+        "u16::MAX-length texture_path must round-trip intact"
+    );
+}
+
+#[test]
+fn texture_path_too_long_returns_error() {
+    // A path longer than u16::MAX bytes must be rejected with TexturePathTooLong,
+    // not silently truncate the stored length while writing the full payload.
+    let path = "x".repeat(u16::MAX as usize + 1);
+    let mut world = World::new();
+    world.spawn_object(
+        Object {
+            texture_path: Some(path),
+            ..Object::default()
+        },
+        None,
+    );
+
+    let mut buf = Vec::new();
+    let result = vtr::write(&mut buf, &test_camera(), &world);
+    assert!(
+        matches!(result, Err(vtr::VtrError::TexturePathTooLong { .. })),
+        "expected TexturePathTooLong, got {result:?}"
+    );
+}
+
+#[test]
+fn texture_path_idempotent_with_texture() {
+    // Serialize -> deserialize -> serialize: bytes must be identical when a
+    // texture_path is present (regression guard for format stability).
+    let mut world = World::new();
+    world.spawn_object(
+        Object {
+            name: "Cube".to_string(),
+            texture_path: Some("textures/brick.png".to_string()),
+            geometry: Some(crate::geometry::Geometry::Cube { size: 1.0 }),
+            color: [0.8, 0.6, 0.4, 1.0],
+            ..Object::default()
+        },
+        None,
+    );
+
+    let camera = custom_camera();
+    let bytes1 = serialize(&camera, &world);
+    let data   = deserialize(&bytes1);
+    let bytes2 = serialize(&data.camera, &data.world);
+
+    assert_eq!(bytes1, bytes2, "textured scene must produce identical bytes on re-serialization");
+}
+
+#[test]
+fn texture_path_error_display() {
+    let e = vtr::VtrError::TexturePathTooLong { len: 70_000 };
+    let s = e.to_string();
+    assert!(s.contains("70000") || s.contains("70_000"), "display should mention the length: {s}");
+    assert!(s.contains("65535") || s.contains("u16"), "display should mention the limit: {s}");
+}

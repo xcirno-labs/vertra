@@ -119,6 +119,9 @@ pub enum VtrError {
     InvalidUtf8(std::string::FromUtf8Error),
     /// An unknown `geometry_tag` byte was encountered.
     UnknownGeometryTag(u8),
+    /// An object's `texture_path` is longer than `u16::MAX` bytes and cannot
+    /// be encoded in the VTR on-disk length field.
+    TexturePathTooLong { len: usize },
 }
 
 impl std::fmt::Display for VtrError {
@@ -138,6 +141,14 @@ impl std::fmt::Display for VtrError {
             VtrError::InvalidUtf8(e) => write!(f, "Invalid UTF-8 in object name: {e}"),
             VtrError::UnknownGeometryTag(tag) => {
                 write!(f, "Unknown geometry tag byte: {tag:#04x}")
+            }
+            VtrError::TexturePathTooLong { len } => {
+                write!(
+                    f,
+                    "texture_path is {len} bytes, which exceeds the maximum \
+                     of {} bytes allowed by the VTR u16 length field",
+                    u16::MAX
+                )
             }
         }
     }
@@ -394,10 +405,15 @@ pub fn write(w: &mut impl Write, camera: &Camera, world: &World) -> Result<(), V
 
         write_geometry(w, &obj.geometry)?;
 
-        // texture_path: u16 length prefix followed by UTF-8 bytes (0 = absent)
+        // texture_path: u16 length prefix followed by UTF-8 bytes (0 = absent).
+        // Validate length fits in u16 before casting to avoid silent truncation
+        // that would corrupt the stream on deserialization.
         match &obj.texture_path {
             Some(tp) => {
                 let tp_bytes = tp.as_bytes();
+                if tp_bytes.len() > u16::MAX as usize {
+                    return Err(VtrError::TexturePathTooLong { len: tp_bytes.len() });
+                }
                 w_u16(w, tp_bytes.len() as u16)?;
                 w.write_all(tp_bytes)?;
             }

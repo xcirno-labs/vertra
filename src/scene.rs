@@ -216,6 +216,13 @@ fn collect_by_texture(
     parent_transform: &Transform,
     groups: &mut HashMap<Option<String>, MeshData>,
 ) {
+    // `collect_by_texture` uses `groups.entry(obj.texture_path.clone())`,
+    // cloning the (potentially long) texture path string for every object
+    // on every frame. This can become a noticeable per-frame allocation cost
+    // in large scenes.
+    // TODO: Consider grouping by a borrowed key (e.g. Option<&str> via
+    //  a two-pass approach) or storing an interned/shared key on Object
+    //  (e.g. Arc<str>), so we can hash without allocating each frame.
     if let Some(obj) = world.objects.get(&object_id) {
         let world_transform = parent_transform.combine(&obj.transform);
 
