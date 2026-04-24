@@ -225,7 +225,8 @@ fn single_object_no_geometry() {
             }),
             geometry: None,
             color: Some([0.1, 0.2, 0.3, 0.9]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -258,7 +259,8 @@ fn roundtrip_geometry(geom: Geometry) -> Option<Geometry> {
             transform: None,
             geometry: Some(geom),
             color: None,
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -326,7 +328,8 @@ fn parent_child_roundtrip() {
             transform: None,
             geometry: Some(Geometry::Cube { size: 1.0 }),
             color: Some([1.0, 0.0, 0.0, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -336,7 +339,8 @@ fn parent_child_roundtrip() {
             transform: Some(Transform::from_position(5.0, 0.0, 0.0)),
             geometry: Some(Geometry::Sphere { radius: 0.5, subdivisions: 8 }),
             color: Some([0.0, 1.0, 0.0, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         Some(parent_id),
     );
@@ -366,7 +370,8 @@ fn deep_three_level_hierarchy() {
             transform: None,
             geometry: Some(Geometry::Sphere { radius: 2.0, subdivisions: 32 }),
             color: Some([1.0, 0.9, 0.2, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -376,7 +381,8 @@ fn deep_three_level_hierarchy() {
             transform: Some(Transform::from_position(6.0, 0.0, 0.0)),
             geometry: Some(Geometry::Sphere { radius: 0.8, subdivisions: 24 }),
             color: Some([0.2, 0.5, 1.0, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         Some(sun_id),
     );
@@ -386,7 +392,8 @@ fn deep_three_level_hierarchy() {
             transform: Some(Transform::from_position(1.5, 0.0, 0.0)),
             geometry: Some(Geometry::Sphere { radius: 0.3, subdivisions: 16 }),
             color: Some([0.7, 0.7, 0.7, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         Some(planet_id),
     );
@@ -412,7 +419,8 @@ fn multiple_roots_order_preserved() {
                     transform: None,
                     geometry: None,
                     color: None,
-                    str_id: None
+                    str_id: None,
+                    texture_path: None,
                 }),
                 None,
             )
@@ -489,7 +497,8 @@ fn empty_name_roundtrip() {
             transform: None,
             geometry: None,
             color: None,
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -507,7 +516,8 @@ fn unicode_name_roundtrip() {
             transform: None,
             geometry: None,
             color: None,
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -526,7 +536,8 @@ fn long_name_roundtrip() {
             transform: None,
             geometry: None,
             color: None,
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -549,7 +560,8 @@ fn transform_all_fields() {
             transform: Some(t.clone()),
             geometry: None,
             color: None,
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -567,7 +579,8 @@ fn color_transparent_black() {
             transform: None,
             geometry: None,
             color: Some(color),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -586,7 +599,8 @@ fn color_hdr_values() {
             transform: None,
             geometry: None,
             color: Some(color),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -618,7 +632,8 @@ fn idempotent_roundtrip() {
             transform: Some(Transform::from_position(1.0, 2.0, 3.0)),
             geometry: Some(Geometry::Sphere { radius: 1.0, subdivisions: 16 }),
             color: Some([0.8, 0.2, 0.4, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -628,7 +643,8 @@ fn idempotent_roundtrip() {
             transform: None,
             geometry: Some(Geometry::Cube { size: 0.5 }),
             color: None,
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         Some(r),
     );
@@ -654,7 +670,8 @@ fn many_objects_roundtrip() {
                 transform: Some(Transform::from_position(i as f32, 0.0, 0.0)),
                 geometry: Some(Geometry::Cube { size: 1.0 }),
                 color: Some([i as f32 / N as f32, 0.5, 1.0, 1.0]),
-                str_id: None
+                str_id: None,
+                texture_path: None,
             }),
             Some(root),
         );
@@ -743,8 +760,8 @@ fn error_unknown_geometry_tag() {
 
 #[test]
 fn error_truncated_header() {
-    // Only 10 bytes - not enough for the full header.
-    let bytes = vec![0x56, 0x54, 0x52, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00];
+    // Only 10 bytes - not enough for the full header (format_version = 2).
+    let bytes = vec![0x56, 0x54, 0x52, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00];
     let mut cur = Cursor::new(&bytes[..]);
     let result = vtr::read(&mut cur);
     assert!(
@@ -829,7 +846,8 @@ fn solar_system_full_roundtrip() {
             transform: Some(Transform::from_position(0.0, 0.0, 0.0)),
             geometry: Some(Geometry::Sphere { radius: 2.0, subdivisions: 32 }),
             color: Some([1.0, 0.9, 0.2, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         None,
     );
@@ -839,7 +857,8 @@ fn solar_system_full_roundtrip() {
             transform: Some(Transform::from_position(6.0, 0.0, 0.0)),
             geometry: Some(Geometry::Sphere { radius: 0.8, subdivisions: 24 }),
             color: Some([0.2, 0.5, 1.0, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         Some(sun),
     );
@@ -849,7 +868,8 @@ fn solar_system_full_roundtrip() {
             transform: Some(Transform::from_position(1.5, 0.0, 0.0)),
             geometry: Some(Geometry::Sphere { radius: 0.3, subdivisions: 16 }),
             color: Some([0.7, 0.7, 0.7, 1.0]),
-            str_id: None
+            str_id: None,
+            texture_path: None,
         }),
         Some(planet),
     );
@@ -862,7 +882,8 @@ fn solar_system_full_roundtrip() {
                     transform: Some(Transform::from_position(4.0 + i as f32 * 0.2, 0.0, 0.0)),
                     geometry: Some(Geometry::Sphere { radius: 0.05, subdivisions: 4 }),
                     color: Some([0.6, 0.5, 0.4, 1.0]),
-                    str_id: None
+                    str_id: None,
+                    texture_path: None,
                 }),
                 Some(sun),
             )
@@ -999,3 +1020,4 @@ fn str_id_unicode_handles() {
     let data = roundtrip(&test_camera(), &world);
     assert_eq!(data.world.get_id(&unicode_id).is_some(), true);
 }
+

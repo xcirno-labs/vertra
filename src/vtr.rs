@@ -35,11 +35,13 @@
 //! │    rotation[3]:    f32 LE * 3                                │
 //! │    scale[3]:       f32 LE * 3                                │
 //! │    color[4]:       f32 LE * 4                                │
-//! │    geometry_tag:   u8                                        │
-//! │      0=None  1=Cube  2=Box  3=Plane                          │
-//! │      4=Pyramid  5=Capsule  6=Sphere                          │
-//! │    geometry_data:  (varies by tag)                           │
-//! │    children_count: u32 LE                                    │
+ //! │    geometry_tag:   u8                                        │
+ //! │      0=None  1=Cube  2=Box  3=Plane                          │
+ //! │      4=Pyramid  5=Capsule  6=Sphere                          │
+ //! │    geometry_data:  (varies by tag)                           │
+ //! │    texture_path_len: u16 LE  (0 = no texture)                │
+ //! │    texture_path:  utf-8 bytes [texture_path_len]             │
+ //! │    children_count: u32 LE                                    │
 //! │    children:       u32 LE * children_count                   │
 //! └──────────────────────────────────────────────────────────────┘
 //! ```
@@ -64,7 +66,7 @@ use crate::world::World;
 pub const MAGIC: [u8; 4] = [0x56, 0x54, 0x52, 0x00]; // "VTR\0"
 
 /// Bump this whenever the binary layout changes in a backward-incompatible way.
-pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION: u16 = 2;
 
 /// Engine version embedded in the header for informational purposes.
 pub const ENGINE_VERSION_MAJOR: u16 = 0;
@@ -392,6 +394,16 @@ pub fn write(w: &mut impl Write, camera: &Camera, world: &World) -> Result<(), V
 
         write_geometry(w, &obj.geometry)?;
 
+        // texture_path: u16 length prefix followed by UTF-8 bytes (0 = absent)
+        match &obj.texture_path {
+            Some(tp) => {
+                let tp_bytes = tp.as_bytes();
+                w_u16(w, tp_bytes.len() as u16)?;
+                w.write_all(tp_bytes)?;
+            }
+            None => w_u16(w, 0)?,
+        }
+
         w_u32(w, obj.children.len() as u32)?;
         for &child_id in &obj.children {
             w_u32(w, child_id as u32)?;
@@ -458,6 +470,16 @@ pub fn read(r: &mut impl Read) -> Result<SceneData, VtrError> {
         let color = r_f32x4(r)?;
         let geometry = read_geometry(r)?;
 
+        // texture_path: u16-prefixed UTF-8 string (0 length = no texture)
+        let tp_len = r_u16(r)? as usize;
+        let texture_path = if tp_len > 0 {
+            let mut tp_bytes = vec![0u8; tp_len];
+            r.read_exact(&mut tp_bytes)?;
+            Some(String::from_utf8(tp_bytes)?)
+        } else {
+            None
+        };
+
         let children_count = r_u32(r)? as usize;
         let mut children = Vec::with_capacity(children_count);
         for _ in 0..children_count {
@@ -478,6 +500,7 @@ pub fn read(r: &mut impl Read) -> Result<SceneData, VtrError> {
                 color,
                 children,
                 parent,
+                texture_path,
             },
         );
     }

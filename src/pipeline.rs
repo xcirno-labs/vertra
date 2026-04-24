@@ -28,16 +28,19 @@ pub struct Pipeline {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     depth_view: wgpu::TextureView,
+    /// Bind group layout for `@group(1)` (texture + sampler).
+    pub texture_bind_group_layout: wgpu::BindGroupLayout,
+    /// Default 1×1 white texture bind group used for untextured objects.
+    pub default_texture_bind_group: wgpu::BindGroup,
+    /// Shared linear sampler reused when creating per-object texture bind groups.
+    pub default_sampler: wgpu::Sampler,
 }
 
-// Shared vertex buffer layout (position + color)
-const VERTEX_ATTRS: [wgpu::VertexAttribute; 2] = [
-    wgpu::VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x3 },
-    wgpu::VertexAttribute {
-        offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-        shader_location: 1,
-        format: wgpu::VertexFormat::Float32x3,
-    },
+// Shared vertex buffer layout: position(3) + color(3) + uv(2)
+const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] = [
+    wgpu::VertexAttribute { offset: 0,  shader_location: 0, format: wgpu::VertexFormat::Float32x3 },
+    wgpu::VertexAttribute { offset: 12, shader_location: 1, format: wgpu::VertexFormat::Float32x3 },
+    wgpu::VertexAttribute { offset: 24, shader_location: 2, format: wgpu::VertexFormat::Float32x2 },
 ];
 
 impl Pipeline {
@@ -119,9 +122,70 @@ impl Pipeline {
             label: Some("camera_bind_group"),
         });
 
+        // Texture bind group layout (group 1)
+        let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("texture_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        // Shared sampler
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("default_sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // Default 1×1 white texture -> untextured objects render with vertex colour
+        let white_texture = device.create_texture_with_data(
+            &queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Default White Texture"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::default(),
+            &[255u8, 255, 255, 255],
+        );
+        let white_view = white_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let default_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("default_texture_bind_group"),
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&white_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&default_sampler) },
+            ],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[Some(&camera_bind_group_layout)],
+            bind_group_layouts: &[Some(&camera_bind_group_layout), Some(&texture_bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -157,11 +221,20 @@ impl Pipeline {
                 compilation_options: PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                // Change front_face from the default CCW to CW
+                front_face: wgpu::FrontFace::Cw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(true),
@@ -187,7 +260,7 @@ impl Pipeline {
                 compilation_options: PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -213,17 +286,22 @@ impl Pipeline {
             camera_buffer,
             camera_bind_group,
             depth_view,
+            texture_bind_group_layout,
+            default_texture_bind_group,
+            default_sampler,
         }
     }
 
-    /// Render in three layers within a single render pass:
-    /// 1. `skybox`  - depth=Always, no depth-write -> always behind everything
-    /// 2. `world`   - normal depth test + write
-    /// 3. `overlay` - depth=Always, no depth-write -> always in front (gizmos)
+    /// Render in three layers within a single render pass.
+    ///
+    /// * `world_batches` - slice of `(mesh, texture_bind_group)` pairs for scene objects.
+    ///   Each pair may carry a different texture; they are all rendered with the main pipeline.
+    /// * `skybox`  - rendered first with the overlay pipeline (depth=Always, no depth-write).
+    /// * `overlay` - rendered last with the overlay pipeline (gizmos, always on top).
     pub fn render_scene(
-        &mut self,
+        &self,
         camera: &Camera,
-        world: &BakedMesh,
+        world_batches: &[(&BakedMesh, &wgpu::BindGroup)],
         skybox: Option<&BakedMesh>,
         overlay: Option<&BakedMesh>,
     ) {
@@ -263,24 +341,29 @@ impl Pipeline {
             if let Some(sky) = skybox {
                 if sky.index_count > 0 {
                     rp.set_pipeline(&self.overlay_pipeline);
+                    rp.set_bind_group(1, &self.default_texture_bind_group, &[]);
                     rp.set_vertex_buffer(0, sky.vertex_buffer.slice(..));
                     rp.set_index_buffer(sky.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     rp.draw_indexed(0..sky.index_count, 0, 0..1);
                 }
             }
 
-            // Layer 2: World (main pipeline → normal depth)
-            if world.index_count > 0 {
-                rp.set_pipeline(&self.render_pipeline);
-                rp.set_vertex_buffer(0, world.vertex_buffer.slice(..));
-                rp.set_index_buffer(world.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                rp.draw_indexed(0..world.index_count, 0, 0..1);
+            // Layer 2: World batches (main pipeline, per-texture)
+            rp.set_pipeline(&self.render_pipeline);
+            for (mesh, tex_bg) in world_batches {
+                if mesh.index_count > 0 {
+                    rp.set_bind_group(1, *tex_bg, &[]);
+                    rp.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    rp.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    rp.draw_indexed(0..mesh.index_count, 0, 0..1);
+                }
             }
 
-            // Layer 3: Overlay / gizmos (overlay pipeline → depth=Always, always on top)
+            // Layer 3: Overlay / gizmos (overlay pipeline -> always on top)
             if let Some(ov) = overlay {
                 if ov.index_count > 0 {
                     rp.set_pipeline(&self.overlay_pipeline);
+                    rp.set_bind_group(1, &self.default_texture_bind_group, &[]);
                     rp.set_vertex_buffer(0, ov.vertex_buffer.slice(..));
                     rp.set_index_buffer(ov.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     rp.draw_indexed(0..ov.index_count, 0, 0..1);
@@ -292,8 +375,8 @@ impl Pipeline {
         frame.present();
     }
 
-    pub fn render_baked_mesh(&mut self, mesh: &BakedMesh, camera: &Camera) {
-        self.render_scene(camera, mesh, None, None);
+    pub fn render_baked_mesh(&self, mesh: &BakedMesh, camera: &Camera) {
+        self.render_scene(camera, &[(mesh, &self.default_texture_bind_group)], None, None);
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -330,5 +413,41 @@ impl Pipeline {
             usage: wgpu::BufferUsages::INDEX,
         });
         BakedMesh { vertex_buffer, index_buffer, index_count: indices.len() as u32 }
+    }
+
+    /// Upload raw RGBA8 pixel data and return a texture bind group for use with
+    /// [`render_scene`].  The texture is created as `Rgba8UnormSrgb`.
+    pub fn create_texture_bind_group_from_rgba(
+        &self,
+        label: &str,
+        width: u32,
+        height: u32,
+        rgba_data: &[u8],
+    ) -> (wgpu::Texture, wgpu::BindGroup) {
+        let texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::default(),
+            rgba_data,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.default_sampler) },
+            ],
+        });
+        (texture, bind_group)
     }
 }

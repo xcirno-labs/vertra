@@ -6,6 +6,36 @@ use crate::world::World;
 use crate::camera::Camera;
 use crate::editor::Editor;
 
+#[wasm_bindgen(typescript_custom_section)]
+const TS_TEXTURE: &'static str = r#"
+/**
+ * Upload raw RGBA8 pixel data as a texture identified by `path_key`.
+ *
+ * Any `VertraObject` whose `texture_path` equals `path_key` will be rendered
+ * with this texture.  Typical usage from JavaScript:
+ *
+ * ```ts
+ * // 1. Fetch the image and decode it into ImageData
+ * const blob  = await fetch('assets/texture.png').then(r => r.blob());
+ * const img   = await createImageBitmap(blob);
+ * const cvs   = new OffscreenCanvas(img.width, img.height);
+ * const ctx   = cvs.getContext('2d')!;
+ * ctx.drawImage(img, 0, 0);
+ * const pixels = ctx.getImageData(0, 0, img.width, img.height);
+ *
+ * // 2. Upload to the engine
+ * scene.load_texture_from_rgba('assets/texture.png', img.width, img.height, pixels.data);
+ * ```
+ *
+ * The key **must** match the `texture_path` set on the object.
+ */
+export interface SceneTextureMethods {
+    load_texture_from_rgba(path_key: string, width: number, height: number, data: Uint8ClampedArray | Uint8Array): void;
+    unload_texture(path_key: string): boolean;
+    has_texture(path_key: string): boolean;
+}
+"#;
+
 /// The root container for a 3D environment.
 ///
 /// Manages the object lifecycle, scene hierarchy, GPU pipeline, and the active
@@ -147,5 +177,41 @@ impl Scene {
             (*self.inner).world  = scene_data.world;
             Ok(())
         }
+    }
+
+    /// Upload raw RGBA8 pixel data as a texture registered under `path_key`.
+    ///
+    /// Any object whose `texture_path` matches `path_key` will be rendered
+    /// with this texture.  Pass a `Uint8ClampedArray` from `ImageData.data`
+    /// (4 bytes per pixel: R, G, B, A in that order).
+    ///
+    /// # Arguments
+    /// * `path_key` - key matching `VertraObject.texture_path`
+    /// * `width`    - image width in pixels
+    /// * `height`   - image height in pixels
+    /// * `data`     - raw RGBA8 bytes (`width * height * 4` bytes)
+    pub fn load_texture_from_rgba(
+        &mut self,
+        path_key: &str,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) {
+        unsafe {
+            (*self.inner).load_texture_from_rgba(path_key, width, height, data);
+        }
+    }
+
+    /// Remove a previously-loaded texture.
+    ///
+    /// Objects that referenced `path_key` fall back to vertex colour rendering.
+    /// Returns `true` if the texture existed and was removed.
+    pub fn unload_texture(&mut self, path_key: &str) -> bool {
+        unsafe { (*self.inner).unload_texture(path_key) }
+    }
+
+    /// Returns `true` if a texture has been uploaded under `path_key`.
+    pub fn has_texture(&self, path_key: &str) -> bool {
+        unsafe { (*self.inner).has_texture(path_key) }
     }
 }

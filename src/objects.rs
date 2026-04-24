@@ -12,6 +12,8 @@ pub struct Object {
     pub children: Vec<usize>,
     pub parent: Option<usize>,
     pub str_id: String,
+    /// Path to a texture image applied to this object's surface.
+    pub texture_path: Option<String>,
 }
 
 pub struct ObjectConstructor {
@@ -20,6 +22,7 @@ pub struct ObjectConstructor {
     pub transform: Option<Transform>,
     pub geometry: Option<Geometry>,
     pub color: Option<[f32; 4]>,
+    pub texture_path: Option<String>,
 }
 
 impl Default for Object {
@@ -30,6 +33,7 @@ impl Default for Object {
             geometry: None,
             color: None,
             str_id: Uuid::new_v4().to_string().into(),
+            texture_path: None,
         })
     }
 }
@@ -40,11 +44,11 @@ impl Object {
             name: config.name,
             transform: config.transform.unwrap_or_default(),
             geometry: config.geometry,
-            // Since we use UUID to generate
             str_id: config.str_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
             color: config.color.unwrap_or([1.0, 1.0, 1.0, 1.0]),
             children: Vec::new(),
             parent: None,
+            texture_path: config.texture_path,
         }
     }
 
@@ -63,6 +67,7 @@ impl Object {
             children: Vec::new(),
             parent: None,
             str_id: str_id.unwrap_or_else(|| Uuid::new_v4().to_string()).into(),
+            texture_path: None,
         }
     }
 }

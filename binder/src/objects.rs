@@ -28,6 +28,7 @@ export interface JsObjectOptions {
 struct InternalObjectOptions {
     str_id: Option<String>,
     color: Option<[f32; 4]>,
+    texture_path: Option<String>,
 }
 
 /// Represents a node in the 3D scene graph.
@@ -73,6 +74,7 @@ impl Object {
             str_id: opts.str_id,
             transform: None,
             geometry: None,
+            texture_path: opts.texture_path,
         });
 
         Self {

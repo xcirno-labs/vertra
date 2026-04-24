@@ -267,6 +267,7 @@ impl<S> Window<S> {
             camera,
             world: World::new(),
             editor: None,
+            textures: std::collections::HashMap::new(),
         });
         if let Some(startup_fn) = &mut self.on_startup_fn {
             startup_fn(&mut self.state, &mut *scene, &mut FrameContext { dt: 0.0 });

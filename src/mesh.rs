@@ -6,6 +6,8 @@ use crate::transform::Transform;
 pub struct Vertex {
     pub position: [f32; 3],
     pub color: [f32; 3],
+    /// UV texture coordinates (default `[0.0, 0.0]` for untextured geometry).
+    pub uv: [f32; 2],
 }
 
 // GPU Side: The actual buffers living in VRAM
@@ -78,30 +80,28 @@ impl MeshData {
         let start_index = self.vertices.len() as u32;
         // TODO: Implement alpha channel
         let c = [color[0], color[1], color[2]];
+        // Planar face UVs: bottom-left -> bottom-right -> top-right -> top-left
+        let uvs: [[f32; 2]; 4] = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
 
-        // Push 4 vertices
-        for p in points {
-            self.vertices.push(Vertex { position: p, color: c });
+        for (p, uv) in points.iter().zip(uvs.iter()) {
+            self.vertices.push(Vertex { position: *p, color: c, uv: *uv });
         }
 
-        // Push 6 indices to form 3 triangles, e.g.
-        // Triangle 1: [0, 1, 2], Triangle 2: [0, 2, 3]
         self.indices.extend_from_slice(&[
-            start_index + 0, start_index + 1, start_index + 2,
-            start_index + 0, start_index + 2, start_index + 3,
+            start_index,     start_index + 1, start_index + 2,
+            start_index,     start_index + 2, start_index + 3,
         ]);
     }
 
     pub fn push_triangle(&mut self, points: [[f32; 3]; 3], color: [f32; 4]) {
         let start_index = self.vertices.len() as u32;
         let c = [color[0], color[1], color[2]];
-        
-        for p in points {
-            self.vertices.push(Vertex { position: p, color: c });
+        let uvs: [[f32; 2]; 3] = [[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]];
+
+        for (p, uv) in points.iter().zip(uvs.iter()) {
+            self.vertices.push(Vertex { position: *p, color: c, uv: *uv });
         }
-        self.indices.extend_from_slice(&[
-            start_index + 0, start_index + 1, start_index + 2
-        ]);
+        self.indices.extend_from_slice(&[start_index, start_index + 1, start_index + 2]);
     }
 
     pub fn clear(&mut self) {
