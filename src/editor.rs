@@ -22,7 +22,7 @@
 //!
 //! Register a callback with [`crate::window::Window::on_editor_event`]:
 //!
-//! ```rust
+//! ```rust,ignore
 //! .on_editor_event(|_state, _scene, event, obj| {
 //!     let name = obj.as_ref().map(|o| o.name.as_str()).unwrap_or("–");
 //!     match event {

@@ -19,6 +19,7 @@ pub struct InspectorData {
     pub scale:         [f32; 3],
     pub color:         [f32; 4],
     pub geometry_type: Option<String>,
+    pub texture_path:  Option<String>,
 }
 
 impl InspectorData {
@@ -33,6 +34,7 @@ impl InspectorData {
             scale:         obj.transform.scale,
             color:         obj.color,
             geometry_type: obj.geometry.as_ref().map(geometry_type_name),
+            texture_path:  obj.texture_path.clone(),
         }
     }
 }

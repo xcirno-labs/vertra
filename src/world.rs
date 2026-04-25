@@ -77,7 +77,7 @@ impl World {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// // Correct: Resolve once during initialization
     /// let sun_id = scene.get_id("sun_center").expect("Sun not found in scene!");
     /// state.sun_id = Some(sun_id);

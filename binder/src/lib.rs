@@ -1,8 +1,8 @@
 pub mod camera;
 pub mod window;
-mod objects;
-mod geometry;
-mod world;
-mod transform;
-mod scene;
+pub mod objects;
+pub mod geometry;
+pub mod world;
+pub mod transform;
+pub mod scene;
 pub mod editor;

@@ -1,11 +1,19 @@
+use std::collections::HashMap;
 use crate::camera::Camera;
 use crate::editor::{EditorEvent, EditorState, InspectorData};
-use crate::mesh::{MeshRegistry};
+use crate::mesh::{MeshData, MeshRegistry};
 use crate::pipeline::Pipeline;
 use crate::world::World;
 use crate::objects::Object;
 use crate::transform::Transform;
 use crate::vtr::{self, VtrError};
+
+/// Holds an uploaded GPU texture and its associated bind group.
+pub struct TextureEntry {
+    #[allow(dead_code)]
+    pub texture: wgpu::Texture,
+    pub bind_group: wgpu::BindGroup,
+}
 
 pub struct Scene {
     pub pipeline:       Pipeline,
@@ -15,6 +23,8 @@ pub struct Scene {
     /// When `Some`, the engine runs in static editor mode.
     /// Attach with [`Scene::enable_editor_mode`].
     pub editor:         Option<EditorState>,
+    /// Per-texture-path GPU resources. Key matches `Object::texture_path`.
+    pub textures:       HashMap<String, TextureEntry>,
 }
 
 impl Scene {
@@ -22,27 +32,88 @@ impl Scene {
         self.world.spawn_object(object, parent_id)
     }
 
-    pub fn draw_world(&mut self) {
-        let mut mesh_data = crate::mesh::MeshData::new();
-        let identity = Transform::default();
+    /// Upload raw RGBA pixel data and register it under `path_key`.
+    ///
+    /// After this call any object whose `texture_path` equals `path_key` will
+    /// have the texture applied during rendering.  Safe to call every frame
+    /// (the previous entry is simply replaced).
+    pub fn load_texture_from_rgba(
+        &mut self,
+        path_key: &str,
+        width: u32,
+        height: u32,
+        rgba_data: &[u8],
+    ) {
+        let (texture, bind_group) = self.pipeline
+            .create_texture_bind_group_from_rgba(path_key, width, height, rgba_data);
+        self.textures.insert(path_key.to_string(), TextureEntry { texture, bind_group });
+    }
 
-        // Flatten the entire world hierarchy into vertices
+    /// Load a PNG / JPEG texture from the file system and register it under its
+    /// path.  After this call any object whose `texture_path` equals `path` will
+    /// be rendered with the image applied.
+    ///
+    /// Only available on native targets (not wasm32). On WASM use
+    /// [`load_texture_from_rgba`] with bytes fetched via JS.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_texture(&mut self, path: &str) -> Result<(), String> {
+        use image::GenericImageView;
+        let img = image::open(path).map_err(|e| format!("load_texture(\"{path}\"): {e}"))?;
+        let rgba = img.to_rgba8();
+        let (width, height) = img.dimensions();
+        self.load_texture_from_rgba(path, width, height, &rgba);
+        Ok(())
+    }
+
+    /// Remove a previously-loaded texture by its key.
+    ///
+    /// Objects that referenced this key fall back to vertex colour.
+    /// Returns `true` if a texture existed under that key and was removed.
+    pub fn unload_texture(&mut self, path_key: &str) -> bool {
+        self.textures.remove(path_key).is_some()
+    }
+
+    /// Returns `true` if a texture has been loaded under `path_key`.
+    pub fn has_texture(&self, path_key: &str) -> bool {
+        self.textures.contains_key(path_key)
+    }
+
+    pub fn draw_world(&mut self) {
+        // Group object geometry by texture_path so we minimise bind-group switches.
+        let mut groups: HashMap<Option<String>, MeshData> = HashMap::new();
+        let identity = Transform::default();
         for &root_id in &self.world.roots {
-            mesh_data.add_object(&self.world, root_id, &identity);
+            collect_by_texture(&self.world, root_id, &identity, &mut groups);
         }
 
-        // Bake world geometry to the GPU
-        let world_baked = mesh_data.bake(&self.pipeline);
+        // Bake each group - collect into Vec so we own the BakedMeshes before
+        // taking any references out of `self.pipeline`.
+        let baked_groups: Vec<(Option<String>, crate::mesh::BakedMesh)> = groups
+            .into_iter()
+            .map(|(key, mesh_data)| (key, mesh_data.bake(&self.pipeline)))
+            .collect();
 
-        // Build gizmo overlay for the selected object (if editor is active)
+        // Pair each baked mesh with the matching bind group (or default white).
+        let world_batches: Vec<(&crate::mesh::BakedMesh, &wgpu::BindGroup)> = baked_groups
+            .iter()
+            .map(|(key, baked)| {
+                let bg: &wgpu::BindGroup = key
+                    .as_ref()
+                    .and_then(|p| self.textures.get(p))
+                    .map(|e| &e.bind_group)
+                    .unwrap_or(&self.pipeline.default_texture_bind_group);
+                (baked, bg)
+            })
+            .collect();
+
+        // Build gizmo overlay for the selected object (if editor is active).
         let overlay_baked = self.editor.as_ref()
             .and_then(|ed| ed.gizmo_overlay_for_selection(&self.world, &self.camera))
             .map(|(v, i)| self.pipeline.create_baked_mesh(&v, &i));
 
-        // Render: borrow disjoint fields to satisfy the borrow checker
-        let camera  = &self.camera;
-        let skybox  = self.editor.as_ref().and_then(|ed| ed.skybox.as_ref());
-        self.pipeline.render_scene(camera, &world_baked, skybox, overlay_baked.as_ref());
+        let camera = &self.camera;
+        let skybox = self.editor.as_ref().and_then(|ed| ed.skybox.as_ref());
+        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref());
     }
 
     /// Switch into static editor mode.
@@ -136,3 +207,35 @@ impl Scene {
         Ok(())
     }
 }
+
+/// Traverse the object hierarchy and accumulate each object's mesh geometry
+/// into a bucket keyed by `texture_path`.  Objects with no geometry are skipped.
+fn collect_by_texture(
+    world: &World,
+    object_id: usize,
+    parent_transform: &Transform,
+    groups: &mut HashMap<Option<String>, MeshData>,
+) {
+    // `collect_by_texture` uses `groups.entry(obj.texture_path.clone())`,
+    // cloning the (potentially long) texture path string for every object
+    // on every frame. This can become a noticeable per-frame allocation cost
+    // in large scenes.
+    // TODO: Consider grouping by a borrowed key (e.g. Option<&str> via
+    //  a two-pass approach) or storing an interned/shared key on Object
+    //  (e.g. Arc<str>), so we can hash without allocating each frame.
+    if let Some(obj) = world.objects.get(&object_id) {
+        let world_transform = parent_transform.combine(&obj.transform);
+
+        if let Some(geo) = &obj.geometry {
+            let entry = groups
+                .entry(obj.texture_path.clone())
+                .or_insert_with(MeshData::new);
+            geo.generate_mesh_data(entry, &world_transform, obj.color);
+        }
+
+        for &child_id in &obj.children {
+            collect_by_texture(world, child_id, &world_transform, groups);
+        }
+    }
+}
+
