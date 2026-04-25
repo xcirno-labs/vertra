@@ -130,40 +130,85 @@ impl World {
     }
 
     pub fn delete(&mut self, id: usize) {
-        let existed = if let Some(obj) = self.objects.remove(&id) {
-            self.name_handles.remove(&obj.str_id);
-            if let Some(p_id) = obj.parent {
-                if let Some(parent) = self.objects.get_mut(&p_id) {
-                    parent.children.retain(|&child_id| child_id != id);
-                }
-            } else {
-                self.roots.retain(|&root_id| root_id != id);
-            }
-            true
-        } else {
-            false
+        // Remove the root object first so we can read its children list and
+        // parent link before they disappear.
+        let obj = match self.objects.remove(&id) {
+            Some(o) => o,
+            None    => return,   // nothing to do; fire no event
         };
-        self.recursive_remove(id);
 
-        if existed {
-            if let Some(cb) = &mut self.on_scene_graph_modified {
-                (cb.0)(SceneGraphEvent::ObjectDeleted { id });
+        self.name_handles.remove(&obj.str_id);
+
+        // Unlink from parent / root list
+        if let Some(p_id) = obj.parent {
+            if let Some(parent) = self.objects.get_mut(&p_id) {
+                parent.children.retain(|&c| c != id);
+            }
+        } else {
+            self.roots.retain(|&r| r != id);
+        }
+
+        // Recursively destroy all descendants (they were already children of `id`)
+        for child_id in obj.children {
+            self.recursive_remove(child_id);
+        }
+
+        if let Some(cb) = &mut self.on_scene_graph_modified {
+            (cb.0)(SceneGraphEvent::ObjectDeleted { id });
+        }
+    }
+
+    /// Returns `true` when `ancestor` is `node` itself or any ancestor of `node`
+    /// in `node`'s subtree — i.e. when making `ancestor` a child of `node` would
+    /// create a cycle.
+    ///
+    /// Walks *down* from `node` through children, so the name "is_in_subtree"
+    /// means "`candidate` appears somewhere inside the subtree rooted at `node`".
+    fn is_in_subtree(&self, node: usize, candidate: usize) -> bool {
+        if node == candidate { return true; }
+        if let Some(obj) = self.objects.get(&node) {
+            for &child in &obj.children {
+                if self.is_in_subtree(child, candidate) {
+                    return true;
+                }
             }
         }
+        false
     }
 
     /// Move `id` to a new parent (or to the scene root when `new_parent` is `None`).
     ///
-    /// No-op when `id` does not exist or equals `new_parent`.
+    /// # No-op conditions
+    /// - `id` does not exist in the world.
+    /// - `new_parent` is the same as the current parent.
+    /// - `new_parent == Some(id)` (self-parenting).
+    /// - `new_parent` does not exist in the world (guards against dangling links).
+    /// - `new_parent` is a descendant of `id` (would create a cycle).
+    ///
     /// The object's children are carried along unchanged.
-    pub fn reparent(&mut self, id: usize, new_parent: Option<usize>) {
-        if Some(id) == new_parent { return; }
+    pub fn reparent(&mut self, id: usize, new_parent: Option<usize>) -> bool {
+        // Self-parenting
+        if Some(id) == new_parent { return false; }
 
+        // Object must exist
         let old_parent = match self.objects.get(&id) {
             Some(obj) => obj.parent,
-            None => return,
+            None => return false,
         };
-        if old_parent == new_parent { return; }
+
+        // Already there
+        if old_parent == new_parent { return false; }
+
+        // Target parent must exist (unless moving to root)
+        if let Some(p_id) = new_parent {
+            if !self.objects.contains_key(&p_id) { return false; }
+        }
+
+        // Cycle guard: new_parent must not be inside id's subtree
+        // TODO: Instead of failing, we can instead switch the position of those objects
+        if let Some(p_id) = new_parent {
+            if self.is_in_subtree(id, p_id) { return false; }
+        }
 
         // Detach from current location
         if let Some(p_id) = old_parent {
@@ -190,5 +235,6 @@ impl World {
         if let Some(cb) = &mut self.on_scene_graph_modified {
             (cb.0)(SceneGraphEvent::ObjectReparented { id, old_parent, new_parent });
         }
+        true
     }
 }

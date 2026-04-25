@@ -101,13 +101,25 @@ impl World {
     /// Pass `undefined` / `null` as `new_parent_id` to move the object to the
     /// scene root.  The object's children are carried along unchanged.
     ///
+    /// Returns `false` and leaves the hierarchy unchanged when any of these
+    /// conditions hold:
+    /// - `id` does not exist.
+    /// - `new_parent_id` does not exist (and is not `null`).
+    /// - `new_parent_id` equals `id` (self-parenting).
+    /// - `new_parent_id` is already the current parent.
+    /// - `new_parent_id` is a descendant of `id` (would create a cycle).
+    ///
     /// # Arguments
     ///
     /// * `id`            - Integer ID of the object to move.
     /// * `new_parent_id` - ID of the new parent, or `undefined` / `null` for root.
-    pub fn reparent(&mut self, id: usize, new_parent_id: Option<usize>) {
+    ///
+    /// # Returns
+    ///
+    /// `true` if the reparent was applied; `false` if it was rejected.
+    pub fn reparent(&mut self, id: usize, new_parent_id: Option<usize>) -> bool {
         unsafe {
-            (*self.inner).reparent(id, new_parent_id);
+            (*self.inner).reparent(id, new_parent_id)
         }
     }
 
