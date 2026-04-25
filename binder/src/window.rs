@@ -54,6 +54,7 @@ pub struct WebWindow {
     on_startup: Option<Function>,
     on_editor_event: Option<Function>,
     with_event_handler: Option<Function>,
+    on_scene_graph_modified: Option<Function>,
 }
 
 #[wasm_bindgen]
@@ -72,6 +73,7 @@ impl WebWindow {
             on_startup: None,
             on_editor_event: None,
             with_event_handler: None,
+            on_scene_graph_modified: None,
         }
     }
 
@@ -106,6 +108,18 @@ impl WebWindow {
     /// Callback signature: `(event: EditorEventType) => void`
     pub fn on_editor_event(&mut self, f: Function) { self.on_editor_event = Some(f); }
 
+    /// Registers a callback fired whenever the scene graph changes structurally.
+    ///
+    /// Fires on object addition, deletion, or re-parenting.
+    ///
+    /// The event object is a tagged union with a `type` field and a `data` payload:
+    /// - `{ type: "object_added",      data: { id: number, parent_id: number | undefined } }`
+    /// - `{ type: "object_deleted",    data: { id: number } }`
+    /// - `{ type: "object_reparented", data: { id: number, old_parent: number | undefined, new_parent: number | undefined } }`
+    ///
+    /// Callback signature: `(event: SceneGraphModifiedEvent) => void`
+    pub fn on_scene_graph_modified(&mut self, f: Function) { self.on_scene_graph_modified = Some(f); }
+
     /// Initializes the engine and starts the RequestAnimationFrame loop.
     /// @param {string} canvas_id - The ID of the HTMLCanvasElement to target.
     pub fn start(mut self, canvas_id: String) {
@@ -129,8 +143,13 @@ impl WebWindow {
             Scene { inner: scene as *mut vertra::scene::Scene }
         }
 
-        if let Some(f) = self.on_startup {
-            engine_window = engine_window.on_startup(move |state, scene, _ctx| {
+        let user_startup = self.on_startup.take();
+        // Always hook on_startup so the scene-graph callback is attached to the
+        // world before any user code runs.
+        engine_window = engine_window.on_startup(move |state, scene, _ctx| {
+            crate::world::attach_scene_graph_cb(&mut scene.world);
+
+            if let Some(ref f) = user_startup {
                 let frame_ctx = FrameContext { dt: _ctx.dt };
                 let _ = f.call3(
                     &JsValue::UNDEFINED,
@@ -138,8 +157,8 @@ impl WebWindow {
                     &JsValue::from(unsafe { wrap_scene(scene) }),
                     &JsValue::from(frame_ctx)
                 );
-            });
-        }
+            }
+        });
 
         if let Some(f) = self.on_update {
             engine_window = engine_window.on_update(move |state, scene, _ctx| {
@@ -359,6 +378,10 @@ impl WebWindow {
                 }
             });
         }
+        // Register the scene-graph-modified JS callback in the thread-local so
+        // that any world mutation (spawn / delete / reparent) fires it.
+        crate::world::register_scene_graph_cb(self.on_scene_graph_modified.take());
+
         engine_window.create();
     }
 }

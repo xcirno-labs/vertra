@@ -1,6 +1,56 @@
 use wasm_bindgen::prelude::*;
+use js_sys::Function;
+use serde::Serialize;
 use crate::objects::Object;
-use vertra::world::{World as CoreWorld};
+use vertra::world::{World as CoreWorld, SceneGraphEvent, SceneGraphCallback};
+
+thread_local! {
+    static SCENE_GRAPH_CB: std::cell::RefCell<Option<Function>> =
+        std::cell::RefCell::new(None);
+}
+
+/// Register (or clear) the JS function that receives scene-graph change events.
+pub(crate) fn register_scene_graph_cb(f: Option<Function>) {
+    SCENE_GRAPH_CB.with(|c| *c.borrow_mut() = f);
+}
+
+/// Serialisable event sent to JavaScript.
+#[derive(Serialize)]
+#[serde(tag = "type", content = "data")]
+pub enum SceneGraphModifiedEvent {
+    #[serde(rename = "object_added")]
+    ObjectAdded { id: usize, parent_id: Option<usize> },
+    #[serde(rename = "object_deleted")]
+    ObjectDeleted { id: usize },
+    #[serde(rename = "object_reparented")]
+    ObjectReparented { id: usize, old_parent: Option<usize>, new_parent: Option<usize> },
+}
+
+fn fire_scene_graph_event(ev: SceneGraphModifiedEvent) {
+    SCENE_GRAPH_CB.with(|c| {
+        if let Some(cb) = c.borrow().as_ref() {
+            if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
+                let _ = cb.call1(&JsValue::UNDEFINED, &js);
+            }
+        }
+    });
+}
+
+/// Install the scene-graph callback on a `CoreWorld` so every structural
+/// mutation fires the registered JS handler.
+pub(crate) fn attach_scene_graph_cb(world: &mut CoreWorld) {
+    world.on_scene_graph_modified = Some(SceneGraphCallback(Box::new(|ev: SceneGraphEvent| {
+        let web_ev = match ev {
+            SceneGraphEvent::ObjectAdded { id, parent_id } =>
+                SceneGraphModifiedEvent::ObjectAdded { id, parent_id },
+            SceneGraphEvent::ObjectDeleted { id } =>
+                SceneGraphModifiedEvent::ObjectDeleted { id },
+            SceneGraphEvent::ObjectReparented { id, old_parent, new_parent } =>
+                SceneGraphModifiedEvent::ObjectReparented { id, old_parent, new_parent },
+        };
+        fire_scene_graph_event(web_ev);
+    })));
+}
 
 /// The entity management system and scene hierarchy container.
 ///
@@ -43,6 +93,21 @@ impl World {
     pub fn delete(&mut self, id: usize) {
         unsafe {
             (*self.inner).delete(id);
+        }
+    }
+
+    /// Moves an object to a new parent in the scene hierarchy.
+    ///
+    /// Pass `undefined` / `null` as `new_parent_id` to move the object to the
+    /// scene root.  The object's children are carried along unchanged.
+    ///
+    /// # Arguments
+    ///
+    /// * `id`            - Integer ID of the object to move.
+    /// * `new_parent_id` - ID of the new parent, or `undefined` / `null` for root.
+    pub fn reparent(&mut self, id: usize, new_parent_id: Option<usize>) {
+        unsafe {
+            (*self.inner).reparent(id, new_parent_id);
         }
     }
 

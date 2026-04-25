@@ -1,12 +1,36 @@
 use std::collections::HashMap;
 use crate::objects::Object;
 
+/// Describes a structural change to the scene hierarchy.
+///
+/// Fired whenever objects are added, removed, or re-parented.
+#[derive(Debug, Clone)]
+pub enum SceneGraphEvent {
+    /// A new object was inserted into the world.
+    ObjectAdded { id: usize, parent_id: Option<usize> },
+    /// An object (and all its descendants) was removed.
+    ObjectDeleted { id: usize },
+    /// An object was moved to a different parent (or to/from root level).
+    ObjectReparented { id: usize, old_parent: Option<usize>, new_parent: Option<usize> },
+}
+
+/// Newtype wrapper around a `FnMut(SceneGraphEvent)` that satisfies `Debug`.
+pub struct SceneGraphCallback(pub Box<dyn FnMut(SceneGraphEvent)>);
+
+impl std::fmt::Debug for SceneGraphCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SceneGraphCallback(<fn>)")
+    }
+}
+
 #[derive(Debug)]
 pub struct World {
     pub objects: HashMap<usize, Object>,
     pub roots: Vec<usize>,
     pub name_handles: HashMap<String, usize>,
     next_id: usize,
+    /// Optional callback invoked after every structural scene-graph change.
+    pub on_scene_graph_modified: Option<SceneGraphCallback>,
 }
 
 impl World {
@@ -16,6 +40,7 @@ impl World {
             roots: Vec::new(),
             next_id: 0,
             name_handles: HashMap::new(),
+            on_scene_graph_modified: None,
         }
     }
 
@@ -37,7 +62,7 @@ impl World {
         for (&id, obj) in &objects {
             name_handles.insert(obj.str_id.clone(), id);
         }
-        Self { objects, roots, next_id, name_handles }
+        Self { objects, roots, next_id, name_handles, on_scene_graph_modified: None }
     }
 
     pub fn spawn_object(&mut self, mut object: Object, parent_id: Option<usize>) -> usize {
@@ -57,6 +82,10 @@ impl World {
         }
 
         self.objects.insert(id, object);
+
+        if let Some(cb) = &mut self.on_scene_graph_modified {
+            (cb.0)(SceneGraphEvent::ObjectAdded { id, parent_id });
+        }
         id
     }
 
@@ -101,17 +130,65 @@ impl World {
     }
 
     pub fn delete(&mut self, id: usize) {
-        if let Some(obj) = self.objects.remove(&id) {
+        let existed = if let Some(obj) = self.objects.remove(&id) {
             self.name_handles.remove(&obj.str_id);
             if let Some(p_id) = obj.parent {
                 if let Some(parent) = self.objects.get_mut(&p_id) {
                     parent.children.retain(|&child_id| child_id != id);
-
                 }
             } else {
                 self.roots.retain(|&root_id| root_id != id);
             }
-        }
+            true
+        } else {
+            false
+        };
         self.recursive_remove(id);
+
+        if existed {
+            if let Some(cb) = &mut self.on_scene_graph_modified {
+                (cb.0)(SceneGraphEvent::ObjectDeleted { id });
+            }
+        }
+    }
+
+    /// Move `id` to a new parent (or to the scene root when `new_parent` is `None`).
+    ///
+    /// No-op when `id` does not exist or equals `new_parent`.
+    /// The object's children are carried along unchanged.
+    pub fn reparent(&mut self, id: usize, new_parent: Option<usize>) {
+        if Some(id) == new_parent { return; }
+
+        let old_parent = match self.objects.get(&id) {
+            Some(obj) => obj.parent,
+            None => return,
+        };
+        if old_parent == new_parent { return; }
+
+        // Detach from current location
+        if let Some(p_id) = old_parent {
+            if let Some(p) = self.objects.get_mut(&p_id) {
+                p.children.retain(|&c| c != id);
+            }
+        } else {
+            self.roots.retain(|&r| r != id);
+        }
+
+        // Attach to new location
+        if let Some(p_id) = new_parent {
+            if let Some(p) = self.objects.get_mut(&p_id) {
+                p.children.push(id);
+            }
+        } else {
+            self.roots.push(id);
+        }
+
+        if let Some(obj) = self.objects.get_mut(&id) {
+            obj.parent = new_parent;
+        }
+
+        if let Some(cb) = &mut self.on_scene_graph_modified {
+            (cb.0)(SceneGraphEvent::ObjectReparented { id, old_parent, new_parent });
+        }
     }
 }
