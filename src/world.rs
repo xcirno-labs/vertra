@@ -119,6 +119,26 @@ impl World {
         self.objects.get_mut(&id)
     }
 
+    /// Rename the stable string identifier of a live object and keep the
+    /// internal `name_handles` cache in sync.
+    ///
+    /// **Always prefer this over writing to `object.str_id` directly** when the
+    /// object is already inside a `World`.  Direct field assignment bypasses the
+    /// cache and will silently break every subsequent [`World::get_id`] call for
+    /// the old or new identifier.
+    ///
+    /// Returns `false` (no-op) when `id` does not exist.
+    pub fn rename_str_id(&mut self, id: usize, new_str_id: String) -> bool {
+        if let Some(obj) = self.objects.get_mut(&id) {
+            let old = std::mem::replace(&mut obj.str_id, new_str_id.clone());
+            self.name_handles.remove(&old);
+            self.name_handles.insert(new_str_id, id);
+            true
+        } else {
+            false
+        }
+    }
+
     fn recursive_remove(&mut self, id: usize) {
         // Remove the object and take ownership of its children list
         if let Some(obj) = self.objects.remove(&id) {

@@ -176,4 +176,26 @@ impl World {
             (*self.inner).roots.clone()
         }
     }
+
+    /// Renames the stable string identifier of a live world object and keeps
+    /// the internal name-handle cache in sync.
+    ///
+    /// Prefer this over writing to `object.str_id` directly when the object is
+    /// already part of the world, as the world maintains an internal
+    /// `str_id → integer id` lookup table that must stay consistent.
+    ///
+    /// # Arguments
+    ///
+    /// * `id`         - Integer ID of the object to rename.
+    /// * `new_str_id` - The replacement string identifier (should be unique
+    ///   within this world).
+    ///
+    /// # Returns
+    ///
+    /// `true` if the rename succeeded; `false` when `id` does not exist.
+    pub fn rename_str_id(&mut self, id: usize, new_str_id: String) -> bool {
+        unsafe {
+            (*self.inner).rename_str_id(id, new_str_id)
+        }
+    }
 }

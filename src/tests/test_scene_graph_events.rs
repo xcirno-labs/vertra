@@ -16,7 +16,7 @@ use crate::world::{SceneGraphCallback, SceneGraphEvent, World};
 fn world_with_log() -> (World, Rc<RefCell<Vec<SceneGraphEvent>>>) {
     let log: Rc<RefCell<Vec<SceneGraphEvent>>> = Rc::new(RefCell::new(Vec::new()));
     let log_clone = Rc::clone(&log);
-    
+
     let mut world = World::new();
     world.on_scene_graph_modified = Some(SceneGraphCallback(Box::new(move |ev| {
         log_clone.borrow_mut().push(ev);
@@ -172,7 +172,7 @@ fn reparent_to_root_sets_new_parent_none() {
         }
         other => panic!("Unexpected event: {other:?}"),
     }
-    
+
     assert!(world.roots.contains(&child));
 }
 
@@ -274,3 +274,44 @@ fn reparent_updates_parent_children_lists() {
     assert_eq!(world.objects[&child].parent, Some(b));
 }
 
+// TODO: Move these test below somewhere else since it's not related to scene graph events
+#[test]
+fn rename_str_id_updates_cache() {
+    let (mut world, _log) = world_with_log();
+    let id = world.spawn_object(default_object("Obj", "old_id"), None);
+
+    let ok = world.rename_str_id(id, "new_id".to_string());
+
+    assert!(ok);
+    assert_eq!(world.get_id("new_id"), Some(id));   // new key resolves
+    assert_eq!(world.get_id("old_id"), None);         // old key is gone
+    assert_eq!(world.objects[&id].str_id, "new_id"); // field is updated
+}
+
+#[test]
+fn rename_str_id_nonexistent_returns_false() {
+    let (mut world, _log) = world_with_log();
+    assert!(!world.rename_str_id(9999, "x".to_string()));
+}
+
+#[test]
+fn direct_field_mutation_desynchronises_cache() {
+    // Documents the hazard: writing obj.str_id directly bypasses the cache.
+    // rename_str_id is the safe path.
+    let (mut world, _log) = world_with_log();
+    let id = world.spawn_object(default_object("Obj", "original"), None);
+
+    // UNSAFE direct mutation - bypasses cache
+    world.objects.get_mut(&id).unwrap().str_id = "bypassed".to_string();
+
+    // Cache still maps "original" -> id; "bypassed" is unknown
+    assert_eq!(world.get_id("original"), Some(id));
+    assert_eq!(world.get_id("bypassed"), None);
+
+    // The safe fix: rename_str_id reads the *current* field value ("bypassed")
+    // as the stale key, removes it (no-op since it wasn't in the cache), then
+    // inserts the correct mapping.
+    let ok = world.rename_str_id(id, "fixed".to_string());
+    assert!(ok);
+    assert_eq!(world.get_id("fixed"), Some(id));
+}

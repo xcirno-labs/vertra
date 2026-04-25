@@ -159,10 +159,48 @@ impl Object {
         unsafe { (*self.inner).str_id.clone() }
     }
 
+    /// Changes the stable string identifier for this object.
+    ///
+    /// > **Note:** if this object is already part of a [`World`], you must also
+    /// > update the world's name-handle cache by calling
+    /// > [`World::rename_str_id`](crate::world::World) or by re-spawning the
+    /// > object.  Changing `str_id` on a live world object without updating the
+    /// > cache will break [`World::get_id`] lookups for this object.
+    #[wasm_bindgen(setter)]
+    pub fn set_str_id(&mut self, str_id: String) {
+        unsafe { (*self.inner).str_id = str_id; }
+    }
+
+    /// Returns the path to the texture image applied to this object, or
+    /// `undefined` when no texture is set.
+    #[wasm_bindgen(getter)]
+    pub fn texture_path(&self) -> Option<String> {
+        unsafe { (*self.inner).texture_path.clone() }
+    }
+
+    /// Sets (or clears) the texture path for this object.
+    ///
+    /// Pass `undefined` / `null` to remove the texture and fall back to vertex
+    /// colour rendering.  Pass a string matching a key previously registered
+    /// with [`Scene::load_texture_from_rgba`] to apply that texture.
+    #[wasm_bindgen(setter)]
+    pub fn set_texture_path(&mut self, path: Option<String>) {
+        unsafe { (*self.inner).texture_path = path; }
+    }
+
     /// Returns the number of direct children attached to this object.
     #[wasm_bindgen(getter)]
     pub fn children_count(&self) -> usize {
         unsafe { (*self.inner).children.len() }
+    }
+
+    /// Returns the integer IDs of all direct children of this object.
+    ///
+    /// The returned array is a snapshot — mutations made after this call are
+    /// not reflected in the previously returned value.
+    #[wasm_bindgen(getter)]
+    pub fn children(&self) -> Vec<usize> {
+        unsafe { (*self.inner).children.clone() }
     }
 }
 
