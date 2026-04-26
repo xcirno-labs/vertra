@@ -1,13 +1,22 @@
 [workspace]
-members = ["binder"]
+members = [
+    ".",
+    "binder"
+]
 
 [package]
 name = "vertra"
+description = "A cross-platform graphics editor built with Rust and WebAssembly."
 version = "0.2.0"
 edition = "2024"
+license = "Apache-2.0"
+license-file = "LICENSE"
+readme = "README.md"
+repository = "https://github.com/xcirno-labs/vertra"
+keywords = ["graphics", "editor", "web", "cross-platform", "rust"]
 
 [dependencies]
-winit = "0.29"
+winit = "0.29.15"
 wgpu = { version = "29.0.1", features = ["webgl"] }
 pollster = "0.3"
 bytemuck = { version = "1.14", features = ["derive"] }
@@ -22,4 +31,4 @@ uuid = { version = "1.23.0", features = ["v4", "js"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]

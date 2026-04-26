@@ -4,20 +4,53 @@ use crate::math::Matrix4;
 use crate::constants::camera;
 use crate::window::FrameContext;
 
+/// A perspective camera that defines the observer's position and orientation
+/// in world space, and supplies the view-projection matrix used by the
+/// rendering pipeline.
+///
+/// # Coordinate system
+/// Vertra uses a **Y-up, left-handed** system.  The camera looks along the
+/// positive Z axis by default.
+///
+/// # Builder pattern
+/// Construct with [`Camera::new`] and then chain the `with_*` setters:
+///
+/// ```rust,ignore
+/// let cam = Camera::new()
+///     .with_position([0.0, 5.0, -10.0])
+///     .with_fov(60.0)
+///     .with_rotation(90.0, -20.0);
+/// ```
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Camera {
-    pub eye: [f32; 3],    // Position of the camera
-    pub target: [f32; 3], // Where the camera is looking
-    pub up: [f32; 3],     // Usually [0.0, 1.0, 0.0]
-    pub aspect: f32,      // width / height
-    pub fov: f32,         // Field of view in degrees
-    pub znear: f32,       // Near clipping plane (e.g., 0.1)
-    pub zfar: f32,        // Far clipping plane (e.g., 100.0)
-    pub lr_rot: f32,      // Left/Right rotation
-    pub ud_rot: f32,      // Up/Down rotation
+    /// World-space position of the camera (the "eye" point).
+    pub eye: [f32; 3],
+    /// World-space point the camera is looking at.
+    pub target: [f32; 3],
+    /// The world-up vector - almost always `[0.0, 1.0, 0.0]`.
+    pub up: [f32; 3],
+    /// Viewport aspect ratio (`width / height`).  Updated automatically on
+    /// window resize.
+    pub aspect: f32,
+    /// Vertical field of view in **degrees**.
+    pub fov: f32,
+    /// Distance to the near clipping plane.  Objects closer than this are not
+    /// rendered.
+    pub znear: f32,
+    /// Distance to the far clipping plane.  Objects farther than this are not
+    /// rendered.
+    pub zfar: f32,
+    /// Horizontal (yaw) angle in degrees.  Drives the `target` direction via
+    /// [`Camera::update_position`] / [`Camera::rotate`].
+    pub lr_rot: f32,
+    /// Vertical (pitch) angle in degrees, clamped to `(-89°, 89°)` to prevent
+    /// gimbal flip.
+    pub ud_rot: f32,
 }
 
 impl Camera {
+    /// Create a camera with sensible defaults (eye at `[0, 2, 5]`, looking at
+    /// the origin, 45° FOV, 0.1–1000 clip range).
     pub fn new() -> Self {
         Self {
             eye: camera::DEFAULT_EYE,
@@ -32,27 +65,39 @@ impl Camera {
         }
     }
 
+    /// Override the aspect ratio (`width / height`).
+    ///
+    /// Called automatically by [`crate::window::Window`] when the viewport is
+    /// resized, but you can also set it during initial setup.
     pub fn with_aspect(mut self, aspect: f32) -> Self {
         self.aspect = aspect;
         self
     }
 
+    /// Set the vertical field of view in **degrees**.
     pub fn with_fov(mut self, fov: f32) -> Self {
         self.fov = fov;
         self
     }
 
+    /// Set the near and far clipping planes.
+    ///
+    /// * `znear` - objects closer than this distance are clipped.
+    /// * `zfar`  - objects farther than this distance are clipped.
     pub fn with_clip_planes(mut self, znear: f32, zfar: f32) -> Self {
         self.znear = znear;
         self.zfar = zfar;
         self
     }
 
+    /// Set the world-space eye position.
     pub fn with_position(mut self, pos: [f32; 3]) -> Self {
         self.eye = pos;
         self
     }
 
+    /// Set the yaw (`rotx`) and pitch (`roty`) angles in degrees and
+    /// recompute [`Camera::target`] accordingly.
     pub fn with_rotation(mut self, rotx: f32, roty: f32) -> Self {
         self.lr_rot = rotx;
         self.ud_rot = roty;
@@ -60,10 +105,17 @@ impl Camera {
         self
     }
 
+    /// Teleport the camera eye to `new_pos` without changing the look
+    /// direction.
     pub fn update_position(&mut self, new_pos: [f32; 3]) {
         self.eye = new_pos;
     }
 
+    /// Compute the combined view-projection matrix for the current camera
+    /// state and return it as a [`Matrix4`].
+    ///
+    /// Used by the pipeline each frame to transform world-space vertices into
+    /// NDC clip space.
     pub fn build_view_projection_matrix(&self) -> Matrix4 {
         let view = Matrix4::look_at(self.eye, self.target, self.up);
         let proj = Matrix4::perspective(self.fov, self.aspect, self.znear, self.zfar);
@@ -89,6 +141,13 @@ impl Camera {
         ];
     }
 
+    /// Apply a mouse-delta rotation.
+    ///
+    /// * `dx` - horizontal delta (positive = right in non-inverted mode).
+    /// * `dy` - vertical delta (positive = down in non-inverted mode).
+    /// * `inverted` - when `true`, both axes are reversed.
+    ///
+    /// Pitch is clamped to `±89°` to prevent the camera from flipping.
     pub fn rotate(&mut self, dx: f32, dy: f32, inverted: bool) {
         if !inverted {
             // Moving mouse up, looks up and right, looks right
@@ -105,6 +164,14 @@ impl Camera {
         self.update_target_from_angles();
     }
 
+    /// Return the normalised **forward** and **right** vectors for the current
+    /// camera orientation.
+    ///
+    /// Useful for computing movement directions in response to WASD input.
+    ///
+    /// # Returns
+    /// `(forward, right)` - both unit-length, perpendicular to each other and
+    /// to [`Camera::up`].
     pub fn get_directions(&self) -> ([f32; 3], [f32; 3]) {
         // Calculate Forward vector (Target - Eye)
         let f = [
@@ -136,6 +203,9 @@ impl Camera {
         (forward, right)
     }
 
+    /// Translate the camera (eye **and** target) by `direction * amount`.
+    ///
+    /// Moving both points together preserves the look direction.
     pub fn move_by(&mut self, direction: [f32; 3], amount: f32) {
         let dx = direction[0] * amount;
         let dy = direction[1] * amount;
@@ -152,6 +222,10 @@ impl Camera {
         self.target[2] += dz;
     }
 
+    /// Process WASD keyboard movement for the current frame.
+    ///
+    /// Reads `W/A/S/D` from `keys` and moves the camera along the forward /
+    /// right axes scaled by `speed * ctx.dt`.
     pub fn handle_default_input(&mut self, keys: &HashSet<KeyCode>, speed: f32, ctx: &mut FrameContext) {
         let (f, r) = self.get_directions();
         let mut move_dir = [0.0, 0.0, 0.0];
