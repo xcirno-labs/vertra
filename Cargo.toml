@@ -9,11 +9,15 @@ name = "vertra"
 description = "A cross-platform graphics editor built with Rust and WebAssembly."
 version = "0.2.0"
 edition = "2024"
-license = "Apache-2.0"
 license-file = "LICENSE"
 readme = "README.md"
 repository = "https://github.com/xcirno-labs/vertra"
 keywords = ["graphics", "editor", "web", "cross-platform", "rust"]
+exclude = [
+    ".github/",
+    "examples/assets/",
+    "src/tests/",
+]
 
 [dependencies]
 winit = "0.29.15"

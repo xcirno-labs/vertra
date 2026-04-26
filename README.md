@@ -29,12 +29,11 @@ a compact binary scene format (VTR), and a WASM/JavaScript binder layer.
 
 ## Getting Started
 
-Vertra is not yet published to crates.io. Clone the repository and reference it via a path
-dependency:
+Add Vertra to your Cargo.toml dependencies:
 
 ```toml
 [dependencies]
-vertra = { path = "../path/to/vertra" }
+vertra = "0.2.0"
 ```
 
 ---
