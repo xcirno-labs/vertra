@@ -61,9 +61,11 @@ impl Scene {
     ///
     /// The unique integer ID assigned to the new object instance.
     pub fn spawn(&mut self, object: &Object, parent_id: Option<usize>) -> usize {
-        unsafe {
+        let id = unsafe {
             (*self.inner).spawn((*object.inner).clone(), parent_id)
-        }
+        };
+        crate::world::drain_scene_graph_events();
+        id
     }
 
     /// Returns a handle to the underlying [`World`] data structure.

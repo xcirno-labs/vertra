@@ -69,10 +69,22 @@ impl World {
         let id = self.next_id;
         self.next_id += 1;
 
+        // Validate parent: if the requested parent does not exist, fall back to
+        // root-level placement so the new object is always reachable for
+        // traversal/rendering and the hierarchy stays consistent.
+        let resolved_parent = parent_id.filter(|p_id| self.objects.contains_key(p_id));
+        if parent_id.is_some() && resolved_parent.is_none() {
+            eprintln!(
+                "spawn_object: parent_id {:?} does not exist; spawning '{}' at root instead",
+                parent_id,
+                object.str_id
+            );
+        }
+
         self.name_handles.insert(object.str_id.clone(), id);
-        object.parent = parent_id;
+        object.parent = resolved_parent;
         // If it has a parent, link the child to the parent
-        if let Some(p_id) = parent_id {
+        if let Some(p_id) = resolved_parent {
             if let Some(parent_obj) = self.objects.get_mut(&p_id) {
                 parent_obj.children.push(id);
             }
@@ -84,7 +96,7 @@ impl World {
         self.objects.insert(id, object);
 
         if let Some(cb) = &mut self.on_scene_graph_modified {
-            (cb.0)(SceneGraphEvent::ObjectAdded { id, parent_id });
+            (cb.0)(SceneGraphEvent::ObjectAdded { id, parent_id: resolved_parent });
         }
         id
     }
