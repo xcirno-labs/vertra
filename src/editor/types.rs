@@ -192,13 +192,23 @@ pub enum EditorStateEvent {
 }
 
 /// Per-frame raw input state maintained by the editor.
+///
+/// Updated on every [`EditorEvent`] by [`crate::editor::EditorState::process`]
+/// and consumed during drag, orbit, and pan logic.
 #[derive(Debug, Default)]
 pub struct EditorInput {
+    /// Whether the left mouse button is currently held down.
     pub left_down:   bool,
+    /// Whether the middle mouse button is currently held down.
     pub middle_down: bool,
+    /// Whether the right mouse button is currently held down.
     pub right_down:  bool,
+    /// Whether the Alt modifier key is currently held.
     pub alt_held:    bool,
+    /// Whether the Ctrl modifier key is currently held.
     pub ctrl_held:   bool,
+    /// Current cursor X position in window-space pixels.
     pub cursor_x:    f32,
+    /// Current cursor Y position in window-space pixels.
     pub cursor_y:    f32,
 }

@@ -8,17 +8,37 @@ use crate::objects::Object;
 use crate::transform::Transform;
 use crate::vtr::{self, VtrError};
 
-/// Holds an uploaded GPU texture and its associated bind group.
+/// A loaded GPU texture paired with its bind group.
+///
+/// Stored in [`Scene::textures`] keyed by the `texture_path` string used on
+/// objects.  The `texture` field is kept alive so the GPU memory is not freed
+/// while the bind group is in use.
 pub struct TextureEntry {
     #[allow(dead_code)]
     pub texture: wgpu::Texture,
+    /// Bind group that wires the texture to the shader's texture slot.
     pub bind_group: wgpu::BindGroup,
 }
 
+/// The root container for a 3D scene.
+///
+/// `Scene` owns all engine subsystems for a single viewport:
+/// * [`Scene::world`]  - the scene-graph (objects, hierarchy).
+/// * [`Scene::camera`] - the viewport camera.
+/// * [`Scene::pipeline`] - the wgpu render pipeline.
+/// * [`Scene::editor`] - optional built-in editor overlay.
+/// * [`Scene::textures`] - loaded GPU textures keyed by path.
+///
+/// A `Scene` is created internally by [`crate::window::Window`] before
+/// `on_startup` fires.  You interact with it through the callbacks.
 pub struct Scene {
+    /// The wgpu render pipeline, surface, and device context.
     pub pipeline:       Pipeline,
+    /// Registry tracking the world mesh (primarily used internally).
     pub mesh_registry:  MeshRegistry,
+    /// Active viewport camera.
     pub camera:         Camera,
+    /// The scene graph containing all objects and their hierarchy.
     pub world:          World,
     /// When `Some`, the engine runs in static editor mode.
     /// Attach with [`Scene::enable_editor_mode`].
@@ -28,6 +48,14 @@ pub struct Scene {
 }
 
 impl Scene {
+    /// Spawn `object` into the scene, optionally as a child of `parent_id`.
+    ///
+    /// This is a thin convenience wrapper around
+    /// [`World::spawn_object`](crate::world::World::spawn_object).
+    /// If `parent_id` is `Some` but the parent does not exist the object is
+    /// placed at root level.
+    ///
+    /// Returns the unique integer ID assigned to the new object.
     pub fn spawn(&mut self, object: Object, parent_id: Option<usize>) -> usize {
         self.world.spawn_object(object, parent_id)
     }
@@ -78,6 +106,15 @@ impl Scene {
         self.textures.contains_key(path_key)
     }
 
+    /// Traverse the entire scene graph and issue a single batched draw call
+    /// per texture group.
+    ///
+    /// Objects are grouped by their `texture_path` so the number of GPU
+    /// bind-group switches is minimised.  The editor gizmo overlay (if any) is
+    /// rendered as a separate pass on top.
+    ///
+    /// Called automatically by [`crate::window::Window`] every frame on
+    /// `RedrawRequested`.  You do not normally need to call this manually.
     pub fn draw_world(&mut self) {
         // Group object geometry by texture_path so we minimise bind-group switches.
         let mut groups: HashMap<Option<String>, MeshData> = HashMap::new();
@@ -238,4 +275,3 @@ fn collect_by_texture(
         }
     }
 }
-

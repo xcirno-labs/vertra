@@ -2,22 +2,65 @@ use crate::mesh::{MeshData, Vertex};
 use crate::transform::Transform;
 use serde::{Serialize, Deserialize};
 
+/// A lightweight opaque handle to a geometry entry in a GPU registry.
+///
+/// Returned by pipeline-internal registration routines; you do not typically
+/// need to construct or inspect this directly.
 #[derive(Debug, Copy, Clone)]
 pub struct GeometryId(pub usize);
 
+/// Procedural geometry primitives supported by the engine.
+///
+/// Each variant stores only the parameters needed to describe its shape; the
+/// actual vertex data is generated on demand via [`Geometry::build`] or
+/// [`Geometry::generate_mesh_data`].
+///
+/// # Coordinate conventions
+/// All dimensions (radii, sizes, heights) are in **world units**.  The
+/// geometry is centred at the local origin unless otherwise noted.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Geometry {
+    /// A uniform cube centred at the origin.
+    ///
+    /// `size` is the full side length; half-extents are `size / 2` on each axis.
     Cube { size: f32 },
+    /// An axis-aligned rectangular box centred at the origin.
+    ///
+    /// `width` = X extent, `height` = Y extent, `depth` = Z extent (full, not half).
     Box { width: f32, height: f32, depth: f32 },
+    /// A flat, double-sided horizontal plane centred at the origin lying in
+    /// the XZ plane.
+    ///
+    /// `size` is the full side length.
     Plane { size: f32 },
+    /// A four-sided pyramid centred at the origin.
+    ///
+    /// The base is a square with full side `base_size` at `y = -height / 2`;
+    /// the apex is at `y = height / 2`.
     Pyramid { base_size: f32, height: f32 },
+    /// A capsule (cylinder capped with hemispheres) centred at the origin,
+    /// oriented along the Y axis.
+    ///
+    /// * `radius`       — radius of the cylinder body and hemispherical caps.
+    /// * `height`       — length of the **cylindrical** body only (not including caps).
+    /// * `subdivisions` — number of horizontal segments; higher values produce
+    ///   a smoother silhouette.
     Capsule { radius: f32, height: f32, subdivisions: usize },
+    /// A UV sphere centred at the origin.
+    ///
+    /// * `radius`       — sphere radius.
+    /// * `subdivisions` — number of horizontal (longitude) segments; latitude
+    ///   segments are derived as `subdivisions / 2`.  Minimum effective value
+    ///   is 8 for a reasonable sphere.
     Sphere { radius: f32, subdivisions: usize },
-    // TODO: add a custom mesh variant
-    // Custom { vertices: Vec<Vertex> }
 }
 
 impl Geometry {
+    /// Build raw vertex and index arrays for this geometry at the world origin
+    /// with a neutral white colour.
+    ///
+    /// Returns `(vertices, indices)`.  The result can be passed directly to
+    /// [`crate::pipeline::Pipeline::create_baked_mesh`] for GPU upload.
     pub fn build(&self) -> (Vec<Vertex>, Vec<u32>) {
         let mut mesh = MeshData::new();
         let identity = Transform::default();
@@ -29,6 +72,11 @@ impl Geometry {
         (mesh.vertices, mesh.indices)
     }
 
+    /// Append this geometry's triangles into an existing [`MeshData`] builder,
+    /// applying `transform` and `color` to every vertex.
+    ///
+    /// This is the low-level primitive used by the scene renderer to batch all
+    /// objects into a single draw call each frame.
     pub fn generate_mesh_data(&self, mesh_data: &mut MeshData, transform: &Transform, color: [f32; 4]) {
         match self {
             Geometry::Cube { size } => {

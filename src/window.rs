@@ -28,14 +28,24 @@ type DrawCallback<S>             = Box<dyn FnMut(&mut S, &mut Scene, &mut FrameC
 type EventCallback<S>            = Box<dyn FnMut(&mut S, &mut Scene, Event<()>, &EventLoopWindowTarget<()>)>;
 type CloseCallback<S>            = Box<dyn FnMut(&mut S, WindowEvent, &EventLoopWindowTarget<()>)>;
 type EditorStateEventCallback<S> = Box<dyn FnMut(&mut S, &mut Scene, EditorStateEvent, Option<Object>)>;
+
 /// Initial window configuration.
+///
+/// Populated via [`Window`]'s builder methods; you would not normally construct
+/// this directly.
 pub struct WindowConfig {
+    /// OS window title bar text.
     pub title: String,
+    /// Initial window height in physical pixels.
     pub height: u32,
+    /// Initial window width in physical pixels.
     pub width: u32,
+    /// Minimum allowed window dimensions `[width, height]` in physical pixels.
     pub minimum_dimension: [u32; 2],
+    /// *(WASM only)* `id` attribute of the `<canvas>` element to render into.
     pub canvas_id: Option<String>,
 }
+
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {

@@ -1,12 +1,23 @@
 use std::ops::Mul;
 
+/// A column-major 4x4 floating-point matrix.
+///
+/// Stored as `data[column][row]`, the same layout as WGSL `mat4x4<f32>`.
+/// Used throughout the engine for model, view, and projection transforms.
+///
+/// # Construction
+/// * [`Matrix4::identity`] - multiplicative identity.
+/// * [`Matrix4::look_at`] - camera view matrix.
+/// * [`Matrix4::perspective`] - WGPU-compatible perspective projection.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Matrix4 {
+    /// Raw matrix data in column-major order: `data[col][row]`.
     pub data: [[f32; 4]; 4],
 }
 
 impl Matrix4 {
+    /// Return the 4x4 multiplicative identity matrix.
     pub fn identity() -> Self {
         Self {
             data: [
@@ -18,6 +29,8 @@ impl Matrix4 {
         }
     }
 
+    /// Multiply this matrix by a 4-component column vector and return the
+    /// result as `[f32; 4]`.
     pub fn mul_vec4(&self, v: [f32; 4]) -> [f32; 4] {
         let mut res = [0.0; 4];
         for row in 0..4 {
@@ -29,6 +42,17 @@ impl Matrix4 {
         res
     }
 
+    /// Build a **WGPU-compatible** perspective projection matrix.
+    ///
+    /// The projection maps the view frustum to NDC clip space using:
+    /// * Depth range `[0.0, 1.0]` (WGPU/D3D convention, not OpenGL's `[-1, 1]`).
+    /// * Left-handed, Y-up coordinate system.
+    ///
+    /// # Parameters
+    /// * `fov_deg` - vertical field of view in **degrees**.
+    /// * `aspect`  - viewport width / height.
+    /// * `near`    - near clipping plane distance (must be `> 0`).
+    /// * `far`     - far clipping plane distance (must be `> near`).
     pub fn perspective(fov_deg: f32, aspect: f32, near: f32, far: f32) -> Self {
         // We are using WGPU-compatible version of this camera perspective projection formula:
         // https://jsantell.com/3d-projection/#field-of-view. We use Column-Major version of
@@ -52,6 +76,17 @@ impl Matrix4 {
         Self { data }
     }
 
+    /// Build a look-at **view** matrix.
+    ///
+    /// Transforms world space into camera (view) space such that:
+    /// * `eye` maps to the origin.
+    /// * The vector from `eye` to `target` maps to the positive Z axis.
+    /// * `up` aligns the camera's vertical.
+    ///
+    /// # Parameters
+    /// * `eye`    - world-space camera position.
+    /// * `target` - world-space point the camera looks at.
+    /// * `up`     - world-space up direction (typically `[0, 1, 0]`).
     pub fn look_at(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Self {
         // The 'Forward' vector (Forward = Target - Eye)
         let f = {
@@ -91,6 +126,11 @@ impl Matrix4 {
         res
     }
 
+    /// Project a world-space 3-D point through this matrix and perform the
+    /// perspective divide, returning NDC coordinates `[x/w, y/w, z/w]`.
+    ///
+    /// Used by the editor to map gizmo centers and axis tips from world space
+    /// to screen space.
     pub fn project_point(&self, p: [f32; 3]) -> [f32; 3] {
         let v = self.mul_vec4([p[0], p[1], p[2], 1.0]);
 
