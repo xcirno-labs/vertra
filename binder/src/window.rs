@@ -106,6 +106,7 @@ impl WebWindow {
     /// Callback signature: `(event: EditorEventType) => void`
     pub fn on_editor_event(&mut self, f: Function) { self.on_editor_event = Some(f); }
 
+
     /// Initializes the engine and starts the RequestAnimationFrame loop.
     /// @param {string} canvas_id - The ID of the HTMLCanvasElement to target.
     pub fn start(mut self, canvas_id: String) {
@@ -129,8 +130,10 @@ impl WebWindow {
             Scene { inner: scene as *mut vertra::scene::Scene }
         }
 
-        if let Some(f) = self.on_startup {
-            engine_window = engine_window.on_startup(move |state, scene, _ctx| {
+        let user_startup = self.on_startup.take();
+        engine_window = engine_window.on_startup(move |state, scene, _ctx| {
+
+            if let Some(ref f) = user_startup {
                 let frame_ctx = FrameContext { dt: _ctx.dt };
                 let _ = f.call3(
                     &JsValue::UNDEFINED,
@@ -138,8 +141,8 @@ impl WebWindow {
                     &JsValue::from(unsafe { wrap_scene(scene) }),
                     &JsValue::from(frame_ctx)
                 );
-            });
-        }
+            }
+        });
 
         if let Some(f) = self.on_update {
             engine_window = engine_window.on_update(move |state, scene, _ctx| {
@@ -359,6 +362,7 @@ impl WebWindow {
                 }
             });
         }
+
         engine_window.create();
     }
 }
