@@ -45,6 +45,12 @@ pub struct Scene {
     pub editor:         Option<EditorState>,
     /// Per-texture-path GPU resources. Key matches `Object::texture_path`.
     pub textures:       HashMap<String, TextureEntry>,
+    /// In-memory VTR snapshot captured the moment play mode is entered.
+    ///
+    /// Restored automatically when the user returns to editor mode, so that
+    /// any mutations that occurred during play (object movement, etc.) are
+    /// reverted to the exact state the editor saved.
+    pub(crate) snapshot: Option<Vec<u8>>,
 }
 
 impl Scene {
@@ -157,7 +163,23 @@ impl Scene {
     ///
     /// Spawns the X/Y/Z axis gizmos at the world origin and initialises the
     /// orbit pivot in front of the camera.  Call once from `on_startup`.
+    ///
+    /// If a play-mode snapshot exists (i.e. the user is returning from play
+    /// mode) the world and camera are first restored to the state they were in
+    /// when play mode was entered, discarding any mutations that occurred during
+    /// play.
     pub fn enable_editor_mode(&mut self) {
+        // Restore play-mode snapshot so play-time mutations are discarded.
+        if let Some(buf) = self.snapshot.take() {
+            match vtr::read(&mut std::io::Cursor::new(buf)) {
+                Ok(data) => {
+                    self.camera = data.camera;
+                    self.world  = data.world;
+                }
+                Err(e) => eprintln!("enable_editor_mode: failed to restore snapshot: {e}"),
+            }
+        }
+
         let w = self.pipeline.surface_config.width  as f32;
         let h = self.pipeline.surface_config.height as f32;
         let mut ed = EditorState::new(w, h);
@@ -175,10 +197,18 @@ impl Scene {
 
     /// Exit editor mode and switch to **play mode**.
     ///
-    /// Drops all editor state (selection, gizmos, skybox, pivot).
-    /// After this call `scene.editor` is `None`, the gizmo overlay is hidden,
-    /// and all client-side event handlers begin receiving raw input events again.
+    /// Captures an in-memory VTR snapshot of the current world and camera so
+    /// that [`Self::enable_editor_mode`] can restore them later.  Drops all
+    /// editor state (selection, gizmos, skybox, pivot).  After this call
+    /// `scene.editor` is `None`, the gizmo overlay is hidden, and all
+    /// client-side event handlers begin receiving raw input events again.
     pub fn disable_editor_mode(&mut self) {
+        // Snapshot current state so we can roll back when returning to editor.
+        let mut buf = Vec::new();
+        match vtr::write(&mut buf, &self.camera, &self.world) {
+            Ok(()) => self.snapshot = Some(buf),
+            Err(e) => eprintln!("disable_editor_mode: failed to capture snapshot: {e}"),
+        }
         self.editor = None;
     }
 
@@ -202,11 +232,6 @@ impl Scene {
     pub fn handle_editor_event(&mut self, event: EditorEvent) {
         if self.editor.is_none() { return; }
 
-        // Default keybind: Escape exits editor mode -> play mode
-        if matches!(&event, EditorEvent::KeyPressed(winit::keyboard::KeyCode::Escape)) {
-            self.editor = None;
-            return;
-        }
 
         if let Some(ed) = &mut self.editor {
             ed.process(&mut self.camera, &mut self.world, event);

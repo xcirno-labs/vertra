@@ -278,6 +278,7 @@ impl<S> Window<S> {
             world: World::new(),
             editor: None,
             textures: std::collections::HashMap::new(),
+            snapshot: None,
         });
         if let Some(startup_fn) = &mut self.on_startup_fn {
             startup_fn(&mut self.state, &mut *scene, &mut FrameContext { dt: 0.0 });
