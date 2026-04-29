@@ -7,6 +7,7 @@ use crate::world::World;
 use crate::objects::Object;
 use crate::transform::Transform;
 use crate::vtr::{self, VtrError};
+use crate::script::{ObjectScript, ScriptRegistry};
 
 /// A loaded GPU texture paired with its bind group.
 ///
@@ -51,6 +52,9 @@ pub struct Scene {
     /// any mutations that occurred during play (object movement, etc.) are
     /// reverted to the exact state the editor saved.
     pub(crate) snapshot: Option<Vec<u8>>,
+    /// Per-object script registry.  Kept separate from `World` so scripts
+    /// never affect serialisation.
+    pub script_registry: ScriptRegistry,
 }
 
 impl Scene {
@@ -242,6 +246,47 @@ impl Scene {
     /// or `None` if nothing is selected or editor mode is inactive.
     pub fn inspector(&self) -> Option<&InspectorData> {
         self.editor.as_ref()?.inspector.selected.as_ref()
+    }
+    
+    /// Attach `script` to object `id`.
+    ///
+    /// The script's [`ObjectScript::on_start`] will be called on the next
+    /// `run_scripts` / `run_fixed_update_scripts` invocation before
+    /// [`ObjectScript::on_update`] / [`ObjectScript::on_fixed_update`].
+    ///
+    /// If the object already had a script it is replaced.  Scripts are
+    /// suppressed while editor mode is active, i.e. the window loop does not call
+    /// `run_scripts` when `scene.editor.is_some()`.
+    pub fn attach_script(&mut self, id: usize, script: Box<dyn ObjectScript>) {
+        self.script_registry.attach(id, script);
+    }
+
+    /// Detach and drop the script for object `id`.
+    ///
+    /// Returns `true` if a script existed and was removed.
+    pub fn detach_script(&mut self, id: usize) -> bool {
+        self.script_registry.detach(id)
+    }
+
+    /// Returns `true` when object `id` has a script attached.
+    pub fn has_script(&self, id: usize) -> bool {
+        self.script_registry.has(id)
+    }
+
+    /// Run `on_start` (first call only) + `on_update` for all attached scripts.
+    ///
+    /// Called automatically by the window loop every frame when not in editor
+    /// mode.  You do not normally need to call this manually.
+    pub fn run_scripts(&mut self, dt: f32) {
+        self.script_registry.run_update(&mut self.world, dt);
+    }
+
+    /// Run `on_start` (first call only) + `on_fixed_update` for all attached scripts.
+    ///
+    /// Called automatically by the window loop at the fixed timestep when not
+    /// in editor mode.  You do not normally need to call this manually.
+    pub fn run_fixed_update_scripts(&mut self, dt: f32) {
+        self.script_registry.run_fixed_update(&mut self.world, dt);
     }
 
     /// Serialize the current camera and world to a `.vtr` binary file.

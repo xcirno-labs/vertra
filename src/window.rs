@@ -279,6 +279,7 @@ impl<S> Window<S> {
             editor: None,
             textures: std::collections::HashMap::new(),
             snapshot: None,
+            script_registry: crate::script::ScriptRegistry::new(),
         });
         if let Some(startup_fn) = &mut self.on_startup_fn {
             startup_fn(&mut self.state, &mut *scene, &mut FrameContext { dt: 0.0 });
@@ -290,6 +291,7 @@ impl<S> Window<S> {
             last_update_inst = now;
 
             if scene.editor.is_none() {
+                scene.run_scripts(dt);
                 if let Some(f) = &mut self.on_update_fn {
                     f(&mut self.state, &mut *scene, &mut FrameContext { dt });
                 }
@@ -357,6 +359,7 @@ impl<S> Window<S> {
                     accumulator += dt;
                     while accumulator >= window::FIXED_DELTA {
                         if scene.editor.is_none() {
+                            scene.run_fixed_update_scripts(window::FIXED_DELTA);
                             if let Some(f) = &mut self.on_fixed_update_fn {
                                 f(&mut self.state, &mut *scene, &mut FrameContext { dt: window::FIXED_DELTA });
                             }
