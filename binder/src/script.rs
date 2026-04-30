@@ -51,26 +51,32 @@ impl ObjectScript for JsObjectScript {
         let Some(f) = &self.on_start_fn else { return; };
         let world_js = crate::world::World { inner: world as *mut CoreWorld };
         let world_val = JsValue::from(world_js);
-        let id_val    = JsValue::from(id as u32);
+        let id_val    = JsValue::from_f64(id as f64);
+        crate::world::script_borrow_enter();
         let _ = f.call2(&JsValue::UNDEFINED, &id_val, &world_val);
+        crate::world::script_borrow_exit();
     }
 
     fn on_update(&mut self, id: usize, world: &mut CoreWorld, dt: f32) {
         let Some(f) = &self.on_update_fn else { return; };
         let world_js = crate::world::World { inner: world as *mut CoreWorld };
         let world_val = JsValue::from(world_js);
-        let id_val    = JsValue::from(id as u32);
+        let id_val    = JsValue::from_f64(id as f64);
         let dt_val    = JsValue::from_f64(dt as f64);
+        crate::world::script_borrow_enter();
         let _ = f.call3(&JsValue::UNDEFINED, &id_val, &world_val, &dt_val);
+        crate::world::script_borrow_exit();
     }
 
     fn on_fixed_update(&mut self, id: usize, world: &mut CoreWorld, dt: f32) {
         let Some(f) = &self.on_fixed_update_fn else { return; };
         let world_js = crate::world::World { inner: world as *mut CoreWorld };
         let world_val = JsValue::from(world_js);
-        let id_val    = JsValue::from(id as u32);
+        let id_val    = JsValue::from_f64(id as f64);
         let dt_val    = JsValue::from_f64(dt as f64);
+        crate::world::script_borrow_enter();
         let _ = f.call3(&JsValue::UNDEFINED, &id_val, &world_val, &dt_val);
+        crate::world::script_borrow_exit();
     }
 }
 
