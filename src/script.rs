@@ -11,10 +11,9 @@
 /// separate from the serialisable [`crate::world::World`].  When no
 /// scripts are attached the hot paths in the window loop are zero-cost:
 /// the empty-check short-circuits before any iteration.  When scripts
-/// *are* present the registry temporarily moves its `Vec` out of
-/// `self` (an O(1) pointer swap) so that the script closures can hold
-/// an exclusive reference to the world simultaneously, with no heap
-/// allocation per frame.
+/// *are* present the registry iterates `self.entries` in-place, `world`
+/// is a separate parameter so both borrows coexist with no heap allocation
+/// per frame and no inconsistent state if a callback panics.
 pub trait ObjectScript: 'static {
     /// Called once the first time the registry runs its update pass after
     /// the script was attached.  Use it to pre-resolve string IDs into
@@ -52,13 +51,13 @@ struct ScriptEntry {
 /// interfere with scene serialisation.
 ///
 /// # Thread safety
-///
-/// `ScriptRegistry` is `!Send` / `!Sync` because trait objects are
-/// heap-allocated with `Box<dyn ObjectScript>`.  This matches the rest of
-/// the engine which is single-threaded.
+/// `ScriptRegistry` is `!Send` / `!Sync` because it stores
+/// `Box<dyn ObjectScript>`, and `dyn ObjectScript` does not require the
+/// `Send` / `Sync` auto-trait bounds. This matches the rest of the engine
+/// which is single-threaded.
 #[derive(Default)]
 pub struct ScriptRegistry {
-    /// Flat storage – optimised for iteration (hot path).
+    /// Flat storage, optimised for iteration (hot path).
     entries: Vec<ScriptEntry>,
     /// Index map for O(1) attach / detach lookups.
     index:   std::collections::HashMap<usize, usize>,
@@ -119,40 +118,84 @@ impl ScriptRegistry {
         self.entries.is_empty()
     }
     
+    /// Reset every script's `started` flag so `on_start` is re-invoked on the
+    /// next update pass.
+    ///
+    /// Call this whenever the world is restored from a snapshot (e.g. when
+    /// entering play mode after editor mode) so that cached IDs and
+    /// per-script state are re-initialised against the fresh world.
+    pub fn reset_started(&mut self) {
+        for entry in &mut self.entries {
+            entry.started = false;
+        }
+    }
+
     /// Run `on_start` (if needed) + `on_update` for every registered script.
     ///
-    /// Internally the entry `Vec` is temporarily *moved out* of `self` via
-    /// `std::mem::take` (an O(1) pointer swap, zero allocation) so that both
-    /// the script and the `&mut World` borrow can be alive concurrently.
-    /// After iteration the `Vec` is moved back.
+    /// Stale entries whose object ID no longer exists in `world` are pruned
+    /// lazily (O(1) swap-remove per stale entry).
+    ///
+    /// Iterates `self.entries` directly — no heap allocation, and registry
+    /// invariants are preserved even if a script callback panics.
     pub(crate) fn run_update(&mut self, world: &mut crate::world::World, dt: f32) {
         if self.entries.is_empty() { return; }
 
-        let mut entries = std::mem::take(&mut self.entries);
-        for entry in &mut entries {
-            if !entry.started {
-                entry.script.on_start(entry.id, world);
-                entry.started = true;
+        let mut i = 0;
+        while i < self.entries.len() {
+            let id = self.entries[i].id;
+            if !world.objects.contains_key(&id) {
+                self.prune_at(i);
+                // Do NOT advance i: the swap moved an unvisited entry here.
+            } else {
+                {
+                    let entry = &mut self.entries[i];
+                    if !entry.started {
+                        entry.script.on_start(id, world);
+                        entry.started = true;
+                    }
+                    entry.script.on_update(id, world, dt);
+                }
+                i += 1;
             }
-            entry.script.on_update(entry.id, world, dt);
         }
-        self.entries = entries;
     }
 
     /// Run `on_start` (if needed) + `on_fixed_update` for every registered
     /// script.
+    ///
+    /// Same pruning and panic-safety guarantees as [`run_update`].
     pub(crate) fn run_fixed_update(&mut self, world: &mut crate::world::World, dt: f32) {
         if self.entries.is_empty() { return; }
 
-        let mut entries = std::mem::take(&mut self.entries);
-        for entry in &mut entries {
-            if !entry.started {
-                entry.script.on_start(entry.id, world);
-                entry.started = true;
+        let mut i = 0;
+        while i < self.entries.len() {
+            let id = self.entries[i].id;
+            if !world.objects.contains_key(&id) {
+                self.prune_at(i);
+            } else {
+                {
+                    let entry = &mut self.entries[i];
+                    if !entry.started {
+                        entry.script.on_start(id, world);
+                        entry.started = true;
+                    }
+                    entry.script.on_fixed_update(id, world, dt);
+                }
+                i += 1;
             }
-            entry.script.on_fixed_update(entry.id, world, dt);
         }
-        self.entries = entries;
+    }
+
+    /// O(1) swap-remove at index `i`, keeping `self.index` consistent.
+    fn prune_at(&mut self, i: usize) {
+        let id = self.entries[i].id;
+        self.index.remove(&id);
+        let last = self.entries.len() - 1;
+        if i != last {
+            self.entries.swap(i, last);
+            let moved_id = self.entries[i].id;
+            self.index.insert(moved_id, i);
+        }
+        self.entries.pop();
     }
 }
-

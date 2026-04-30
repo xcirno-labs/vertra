@@ -214,6 +214,11 @@ impl Scene {
             Err(e) => eprintln!("disable_editor_mode: failed to capture snapshot: {e}"),
         }
         self.editor = None;
+        // Reset all scripts so on_start re-runs against the fresh world that
+        // will be restored when the user returns to editor mode.  Without this,
+        // cached IDs / base transforms from a previous play session would be
+        // stale after the snapshot is restored.
+        self.script_registry.reset_started();
     }
 
     /// Feed a platform-agnostic [`EditorEvent`] into the editor.
@@ -311,6 +316,9 @@ impl Scene {
         let data = vtr::read_from_file(path)?;
         self.camera = data.camera;
         self.world  = data.world;
+        // World has changed, cached script state (IDs, transforms, etc.) is
+        // no longer valid for the new world, so force on_start to re-run.
+        self.script_registry.reset_started();
         Ok(())
     }
 }
