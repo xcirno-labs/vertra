@@ -34,6 +34,7 @@ pub mod constants;
 pub mod world;
 pub mod objects;
 pub mod editor;
+pub mod script;
 
 #[cfg(test)]
 mod tests;

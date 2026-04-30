@@ -13,6 +13,44 @@ thread_local! {
     /// the same pointer as a second `&mut`.
     static SCENE_GRAPH_QUEUE: std::cell::RefCell<Vec<SceneGraphModifiedEvent>> =
         std::cell::RefCell::new(Vec::new());
+    /// Set to `true` for the duration of a JS script callback.
+    ///
+    /// Any World WASM method that takes `&mut self` checks this flag and throws
+    /// a JS TypeError if it is set, preventing a JS script from creating a
+    /// second aliased `&mut CoreWorld` through the raw pointer while the Rust
+    /// borrow is still alive.
+    static SCRIPT_BORROW_ACTIVE: std::cell::Cell<bool> =
+        std::cell::Cell::new(false);
+}
+
+/// Mark the start of a JS script callback.  Call [`script_borrow_exit`] in
+/// every code path that follows (including after a JS exception is caught).
+pub(crate) fn script_borrow_enter() {
+    SCRIPT_BORROW_ACTIVE.with(|c| c.set(true));
+}
+
+/// Mark the end of a JS script callback, re-enabling world mutations.
+pub(crate) fn script_borrow_exit() {
+    SCRIPT_BORROW_ACTIVE.with(|c| c.set(false));
+}
+
+/// Throw a JS TypeError when called re-entrantly during a script callback.
+///
+/// Inserted at the top of every `&mut self` World WASM method so that a JS
+/// script cannot create a second aliased `&mut CoreWorld` while the Rust
+/// callback still holds the first one.
+#[inline]
+fn guard_no_script_borrow() {
+    // TODO: this is a bit of a blunt instrument, it prevents *any* world mutation
+    if SCRIPT_BORROW_ACTIVE.with(|c| c.get()) {
+        wasm_bindgen::throw_str(
+            "World mutation (spawn_object / delete / reparent / rename_str_id) \
+             is not allowed inside an on_start / on_update / on_fixed_update \
+             script callback because Rust already holds an exclusive borrow of \
+             the world at that point.  Enqueue mutations and apply them after \
+             the callback returns instead."
+        );
+    }
 }
 
 /// Register (or clear) the JS function that receives scene-graph change events.
@@ -100,6 +138,7 @@ impl World {
     ///
     /// The unique integer ID assigned to the new object instance.
     pub fn spawn_object(&mut self, object: &Object, parent_id: Option<usize>) -> usize {
+        guard_no_script_borrow();
         let id = unsafe {
             (*self.inner).spawn_object((*object.inner).clone(), parent_id)
         };
@@ -117,6 +156,7 @@ impl World {
     ///
     /// * `id` - The unique integer ID of the root object to remove.
     pub fn delete(&mut self, id: usize) {
+        guard_no_script_borrow();
         unsafe {
             (*self.inner).delete(id);
         }
@@ -145,6 +185,7 @@ impl World {
     ///
     /// `true` if the reparent was applied; `false` if it was rejected.
     pub fn reparent(&mut self, id: usize, new_parent_id: Option<usize>) -> bool {
+        guard_no_script_borrow();
         let result = unsafe {
             (*self.inner).reparent(id, new_parent_id)
         };
@@ -223,6 +264,7 @@ impl World {
     ///
     /// `true` if the rename succeeded; `false` when `id` does not exist.
     pub fn rename_str_id(&mut self, id: usize, new_str_id: String) -> bool {
+        guard_no_script_borrow();
         unsafe {
             (*self.inner).rename_str_id(id, new_str_id)
         }

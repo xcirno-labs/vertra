@@ -5,6 +5,7 @@ use crate::objects::Object;
 use crate::world::World;
 use crate::camera::Camera;
 use crate::editor::Editor;
+use crate::script::WasmScript;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_TEXTURE: &'static str = r#"
@@ -215,5 +216,32 @@ impl Scene {
     /// Returns `true` if a texture has been uploaded under `path_key`.
     pub fn has_texture(&self, path_key: &str) -> bool {
         unsafe { (*self.inner).has_texture(path_key) }
+    }
+    
+    /// Attach a [`JsScript`] to object `id`.
+    ///
+    /// `on_start` will be called on the next frame before `on_update`.
+    /// Replaces any previously attached script.
+    ///
+    /// # Arguments
+    ///
+    /// * `id`     - Integer ID of the target object.
+    /// * `script` - A [`JsScript`] constructed with callback functions.
+    pub fn attach_script(&mut self, id: usize, script: WasmScript) {
+        unsafe {
+            (*self.inner).attach_script(id, script.into_core_script());
+        }
+    }
+
+    /// Detach and drop the script for object `id`.
+    ///
+    /// Returns `true` if a script existed and was removed, `false` otherwise.
+    pub fn detach_script(&mut self, id: usize) -> bool {
+        unsafe { (*self.inner).detach_script(id) }
+    }
+
+    /// Returns `true` when object `id` has a script attached.
+    pub fn has_script(&self, id: usize) -> bool {
+        unsafe { (*self.inner).has_script(id) }
     }
 }
