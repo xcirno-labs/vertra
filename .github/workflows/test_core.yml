@@ -11,7 +11,7 @@ env:
 
 jobs:
   test:
-    name: Test Suite
+    name: Core Test Suite
     runs-on: ubuntu-latest
 
     steps:
@@ -45,6 +45,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+
+      - name: Install wasm-pack
+        run: curl https://wasm-bindgen.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
