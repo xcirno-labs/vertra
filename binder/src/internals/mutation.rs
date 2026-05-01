@@ -123,6 +123,8 @@ pub fn queue_mutation(m: Mutation) {
 /// `world_ptr` must be a valid, exclusively-owned pointer.  It is never
 /// dereferenced when the queue is empty, so a null pointer is safe in that
 /// case.
+///
+/// <div class="warning">Never use this function outside internal use.</div>
 #[doc(hidden)]
 pub fn flush_mutations(world_ptr: *mut CoreWorld) {
     let mutations: Vec<Mutation> =

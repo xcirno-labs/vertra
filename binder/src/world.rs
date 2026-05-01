@@ -94,7 +94,8 @@ impl World {
     ///
     /// # Returns
     ///
-    /// `true` if the reparent was applied; `false` if it was rejected.
+    /// `true` if the reparent was applied or successfully queued (if running
+    /// inside an object script); returns `false` if the `id` does not exist.
     pub fn reparent(&mut self, id: usize, new_parent_id: Option<usize>) -> bool {
         if is_script_borrow_active() {
             queue_mutation(Mutation::Reparent { id, new_parent: new_parent_id });
@@ -174,7 +175,8 @@ impl World {
     ///
     /// # Returns
     ///
-    /// `true` if the rename succeeded; `false` when `id` does not exist.
+    /// `true` if the rename was applied or successfully queued (if running
+    /// inside an object script); returns `false` if the `id` does not exist.
     pub fn rename_str_id(&mut self, id: usize, new_str_id: String) -> bool {
         if is_script_borrow_active() {
             queue_mutation(Mutation::Rename { id, new_str_id });
