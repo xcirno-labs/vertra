@@ -16,4 +16,4 @@ winit = "0.29.15"
 wasm-bindgen-test = "0.3"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
