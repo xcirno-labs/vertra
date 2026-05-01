@@ -10,9 +10,9 @@ pub(crate) const GIZMO_SCREEN_PX: f32 = 80.0;
 
 /// Build the three-axis **translate** gizmo: thin box shafts ending in cone tips.
 ///
-/// * X axis (red)   — cone pointing +X
-/// * Y axis (green) — cone pointing +Y
-/// * Z axis (blue)  — cone pointing +Z
+/// * X axis (red)   - cone pointing +X
+/// * Y axis (green) - cone pointing +Y
+/// * Z axis (blue)  - cone pointing +Z
 pub fn build_gizmo_mesh_data(center: [f32; 3], scale: f32) -> (Vec<Vertex>, Vec<u32>) {
     let mut mesh    = MeshData::new();
     let shaft_h     = scale * 0.025;
@@ -52,9 +52,9 @@ pub fn build_gizmo_mesh_data(center: [f32; 3], scale: f32) -> (Vec<Vertex>, Vec<
 
 /// Build the **rotate** gizmo: three coloured ring-tubes, one per axis.
 ///
-/// * X ring (red)   — YZ plane, rotates around +X
-/// * Y ring (green) — XZ plane, rotates around +Y
-/// * Z ring (blue)  — XY plane, rotates around +Z
+/// * X ring (red)   - YZ plane, rotates around +X
+/// * Y ring (green) - XZ plane, rotates around +Y
+/// * Z ring (blue)  - XY plane, rotates around +Z
 pub fn build_rotate_gizmo_mesh_data(center: [f32; 3], scale: f32) -> (Vec<Vertex>, Vec<u32>) {
     let mut mesh = MeshData::new();
     let ring_r   = scale;
@@ -77,9 +77,9 @@ pub fn build_rotate_gizmo_mesh_data(center: [f32; 3], scale: f32) -> (Vec<Vertex
 
 /// Build the **scale** gizmo: three axis shafts ending in coloured cubes.
 ///
-/// * X axis (red)   — cube tip along +X
-/// * Y axis (green) — cube tip along +Y
-/// * Z axis (blue)  — cube tip along +Z
+/// * X axis (red)   - cube tip along +X
+/// * Y axis (green) - cube tip along +Y
+/// * Z axis (blue)  - cube tip along +Z
 pub fn build_scale_gizmo_mesh_data(center: [f32; 3], scale: f32) -> (Vec<Vertex>, Vec<u32>) {
     let mut mesh  = MeshData::new();
     let shaft_h   = scale * 0.025;
@@ -155,7 +155,7 @@ pub fn build_selection_box(center: [f32; 3], half: [f32; 3]) -> (Vec<Vertex>, Ve
     (mesh.vertices, mesh.indices)
 }
 
-/// Build the skybox mesh — a large box visible from inside, rendered with
+/// Build the skybox mesh - a large box visible from inside, rendered with
 /// the overlay pipeline (`cull_mode: None`).
 pub fn build_skybox_mesh() -> (Vec<Vertex>, Vec<u32>) {
     let mut mesh = MeshData::new();

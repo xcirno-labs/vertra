@@ -28,3 +28,32 @@ jobs:
 
       - name: Run tests
         run: cargo test --lib --bins --tests --verbose
+
+  binder-test:
+    name: Binder Node Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-ci-cache"
+          # Ensure the cache includes the binder directory
+          workspaces: "binder -> target"
+
+      - name: Run Binder tests
+        run: |
+          cd binder
+          wasm-pack test --node

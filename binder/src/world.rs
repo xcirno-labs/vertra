@@ -1,123 +1,32 @@
 use wasm_bindgen::prelude::*;
 use js_sys::Function;
-use serde::Serialize;
 use crate::objects::Object;
-use vertra::world::{World as CoreWorld, SceneGraphEvent, SceneGraphCallback};
+use vertra::world::World as CoreWorld;
+use crate::internals::mutation::{
+    is_script_borrow_active,
+    queue_mutation,
+    drain_scene_graph_events,
+    Mutation,
+};
 
-thread_local! {
-    static SCENE_GRAPH_CB: std::cell::RefCell<Option<Function>> =
-        std::cell::RefCell::new(None);
-    /// Pending events accumulated during a world-mutation call.
-    /// They are drained and dispatched to JS only after the `*mut CoreWorld`
-    /// borrow has been fully released, preventing JS re-entrancy from aliasing
-    /// the same pointer as a second `&mut`.
-    static SCENE_GRAPH_QUEUE: std::cell::RefCell<Vec<SceneGraphModifiedEvent>> =
-        std::cell::RefCell::new(Vec::new());
-    /// Set to `true` for the duration of a JS script callback.
-    ///
-    /// Any World WASM method that takes `&mut self` checks this flag and throws
-    /// a JS TypeError if it is set, preventing a JS script from creating a
-    /// second aliased `&mut CoreWorld` through the raw pointer while the Rust
-    /// borrow is still alive.
-    static SCRIPT_BORROW_ACTIVE: std::cell::Cell<bool> =
-        std::cell::Cell::new(false);
-}
 
-/// Mark the start of a JS script callback.  Call [`script_borrow_exit`] in
-/// every code path that follows (including after a JS exception is caught).
-pub(crate) fn script_borrow_enter() {
-    SCRIPT_BORROW_ACTIVE.with(|c| c.set(true));
-}
-
-/// Mark the end of a JS script callback, re-enabling world mutations.
-pub(crate) fn script_borrow_exit() {
-    SCRIPT_BORROW_ACTIVE.with(|c| c.set(false));
-}
-
-/// Throw a JS TypeError when called re-entrantly during a script callback.
-///
-/// Inserted at the top of every `&mut self` World WASM method so that a JS
-/// script cannot create a second aliased `&mut CoreWorld` while the Rust
-/// callback still holds the first one.
-#[inline]
-fn guard_no_script_borrow() {
-    // TODO: this is a bit of a blunt instrument, it prevents *any* world mutation
-    if SCRIPT_BORROW_ACTIVE.with(|c| c.get()) {
-        wasm_bindgen::throw_str(
-            "World mutation (spawn_object / delete / reparent / rename_str_id) \
-             is not allowed inside an on_start / on_update / on_fixed_update \
-             script callback because Rust already holds an exclusive borrow of \
-             the world at that point.  Enqueue mutations and apply them after \
-             the callback returns instead."
-        );
-    }
-}
-
-/// Register (or clear) the JS function that receives scene-graph change events.
-pub(crate) fn register_scene_graph_cb(f: Option<Function>) {
-    SCENE_GRAPH_CB.with(|c| *c.borrow_mut() = f);
-}
-
-/// Serialisable event sent to JavaScript.
-#[derive(Serialize)]
-#[serde(tag = "type", content = "data")]
-pub enum SceneGraphModifiedEvent {
-    #[serde(rename = "object_added")]
-    ObjectAdded { id: usize, parent_id: Option<usize> },
-    #[serde(rename = "object_deleted")]
-    ObjectDeleted { id: usize },
-    #[serde(rename = "object_reparented")]
-    ObjectReparented { id: usize, old_parent: Option<usize>, new_parent: Option<usize> },
-}
-
-fn fire_scene_graph_event(ev: SceneGraphModifiedEvent) {
-    // Push into the queue; the caller is responsible for draining it once the
-    // mutable world borrow has been released (see `drain_scene_graph_events`).
-    SCENE_GRAPH_QUEUE.with(|q| q.borrow_mut().push(ev));
-}
-
-/// Drain the pending scene-graph event queue and dispatch each event to JS.
-///
-/// Must be called **after** every world-mutating binder call (`spawn_object`,
-/// `delete`, `reparent`) so that the `*mut CoreWorld` raw pointer is no longer
-/// borrowed when JS receives the callback and can potentially re-enter WASM.
-pub(crate) fn drain_scene_graph_events() {
-    let events: Vec<SceneGraphModifiedEvent> =
-        SCENE_GRAPH_QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()));
-
-    if events.is_empty() { return; }
-
-    SCENE_GRAPH_CB.with(|c| {
-        if let Some(cb) = c.borrow().as_ref() {
-            for ev in events {
-                if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
-                    let _ = cb.call1(&JsValue::UNDEFINED, &js);
-                }
-            }
-        }
-    });
-}
-
-/// Install the scene-graph callback on a `CoreWorld` so every structural
-/// mutation fires the registered JS handler.
-pub(crate) fn attach_scene_graph_cb(world: &mut CoreWorld) {
-    world.on_scene_graph_modified = Some(SceneGraphCallback(Box::new(|ev: SceneGraphEvent| {
-        let web_ev = match ev {
-            SceneGraphEvent::ObjectAdded { id, parent_id } =>
-                SceneGraphModifiedEvent::ObjectAdded { id, parent_id },
-            SceneGraphEvent::ObjectDeleted { id } =>
-                SceneGraphModifiedEvent::ObjectDeleted { id },
-            SceneGraphEvent::ObjectReparented { id, old_parent, new_parent } =>
-                SceneGraphModifiedEvent::ObjectReparented { id, old_parent, new_parent },
-        };
-        fire_scene_graph_event(web_ev);
-    })));
-}
+pub(crate) use crate::internals::mutation::register_scene_graph_cb;
+pub(crate) use crate::internals::mutation::attach_scene_graph_cb;
 
 /// The entity management system and scene hierarchy container.
 ///
 /// Handles creation, destruction, and retrieval of scene objects.
 /// Obtain the world for the active scene via [`Scene::world`].
+///
+/// # Script-callback safety
+///
+/// All mutation methods (`spawn_object`, `delete`, `reparent`,
+/// `rename_str_id`) are safe to call from inside an `on_start`,
+/// `on_update`, or `on_fixed_update` script callback.  When called during a
+/// callback the operation is **silently deferred**: it is placed on an
+/// internal queue and replayed against the real world the instant the
+/// callback returns.  The JS caller receives the correct return value
+/// immediately (e.g. the pre-allocated spawn ID).
 #[wasm_bindgen]
 pub struct World {
     #[wasm_bindgen(skip)]
@@ -126,7 +35,13 @@ pub struct World {
 
 #[wasm_bindgen]
 impl World {
-    /// Spawns an object into the world, optionally as a child of an existing object.
+    /// Spawns an object into the world, optionally as a child of an existing
+    /// object.
+    ///
+    /// When called **inside a script callback** the spawn is deferred until
+    /// the callback returns; the returned ID is pre-allocated and will be
+    /// valid immediately after the callback.  Sequential deferred spawns
+    /// receive sequential IDs.
     ///
     /// # Arguments
     ///
@@ -138,43 +53,39 @@ impl World {
     ///
     /// The unique integer ID assigned to the new object instance.
     pub fn spawn_object(&mut self, object: &Object, parent_id: Option<usize>) -> usize {
-        guard_no_script_borrow();
-        let id = unsafe {
-            (*self.inner).spawn_object((*object.inner).clone(), parent_id)
-        };
+        if is_script_borrow_active() {
+            let pre_id   = unsafe { (*self.inner).alloc_id() };
+            let core_obj = unsafe { (*object.inner).clone() };
+            queue_mutation(Mutation::Spawn { id: pre_id, object: core_obj, parent: parent_id });
+            return pre_id;
+        }
+        let id = unsafe { (*self.inner).spawn_object((*object.inner).clone(), parent_id) };
         drain_scene_graph_events();
         id
     }
 
     /// Removes an object and all of its descendants from the world.
     ///
-    /// Any integer IDs or [`Object`] references held in JavaScript that
-    /// point to the deleted object or its children become dangling after this
-    /// call; do not use them for further world queries.
+    /// When called **inside a script callback** the deletion is deferred until
+    /// the callback returns.
     ///
     /// # Arguments
     ///
     /// * `id` - The unique integer ID of the root object to remove.
     pub fn delete(&mut self, id: usize) {
-        guard_no_script_borrow();
-        unsafe {
-            (*self.inner).delete(id);
+        if is_script_borrow_active() {
+            queue_mutation(Mutation::Delete(id));
+            return;
         }
+        unsafe { (*self.inner).delete(id); }
         drain_scene_graph_events();
     }
 
     /// Moves an object to a new parent in the scene hierarchy.
     ///
-    /// Pass `undefined` / `null` as `new_parent_id` to move the object to the
-    /// scene root.  The object's children are carried along unchanged.
-    ///
-    /// Returns `false` and leaves the hierarchy unchanged when any of these
-    /// conditions hold:
-    /// - `id` does not exist.
-    /// - `new_parent_id` does not exist (and is not `null`).
-    /// - `new_parent_id` equals `id` (self-parenting).
-    /// - `new_parent_id` is already the current parent.
-    /// - `new_parent_id` is a descendant of `id` (would create a cycle).
+    /// When called **inside a script callback** the reparent is deferred.
+    /// `true` is returned optimistically; the actual outcome is determined
+    /// when the mutation is flushed after the callback.
     ///
     /// # Arguments
     ///
@@ -185,17 +96,18 @@ impl World {
     ///
     /// `true` if the reparent was applied; `false` if it was rejected.
     pub fn reparent(&mut self, id: usize, new_parent_id: Option<usize>) -> bool {
-        guard_no_script_borrow();
-        let result = unsafe {
-            (*self.inner).reparent(id, new_parent_id)
-        };
+        if is_script_borrow_active() {
+            queue_mutation(Mutation::Reparent { id, new_parent: new_parent_id });
+            return true;
+        }
+        let result = unsafe { (*self.inner).reparent(id, new_parent_id) };
         drain_scene_graph_events();
         result
     }
 
     /// Retrieves a live reference to an object by its integer ID.
     ///
-    /// The returned [`Object`] is **owned by the world** — do not manually
+    /// The returned [`Object`] is **owned by the world**. Do not manually
     /// destroy it on the JS side, and do not retain it across calls to
     /// [`World::delete`] with the same ID.
     ///
@@ -242,9 +154,7 @@ impl World {
     ///
     /// An array of integer IDs, one for each root object.
     pub fn get_roots(&self) -> Vec<usize> {
-        unsafe {
-            (*self.inner).roots.clone()
-        }
+        unsafe { (*self.inner).roots.clone() }
     }
 
     /// Renames the stable string identifier of a live world object and keeps
@@ -252,7 +162,9 @@ impl World {
     ///
     /// Prefer this over writing to `object.str_id` directly when the object is
     /// already part of the world, as the world maintains an internal
-    /// `str_id → integer id` lookup table that must stay consistent.
+    /// `str_id -> integer id` lookup table that must stay consistent.
+    ///
+    /// When called **inside a script callback** the rename is deferred.
     ///
     /// # Arguments
     ///
@@ -264,17 +176,18 @@ impl World {
     ///
     /// `true` if the rename succeeded; `false` when `id` does not exist.
     pub fn rename_str_id(&mut self, id: usize, new_str_id: String) -> bool {
-        guard_no_script_borrow();
-        unsafe {
-            (*self.inner).rename_str_id(id, new_str_id)
+        if is_script_borrow_active() {
+            queue_mutation(Mutation::Rename { id, new_str_id });
+            return true;
         }
+        unsafe { (*self.inner).rename_str_id(id, new_str_id) }
     }
 
     /// Registers a callback fired whenever the scene graph changes structurally
     /// (object added, deleted, or re-parented).
     ///
     /// This installs the internal Rust hook on the underlying world **and**
-    /// stores the JS handler — both steps happen in a single call, so you can
+    /// stores the JS handler, both steps happen in a single call, so you can
     /// wire it up directly from `on_startup` without touching `WebWindow`:
     ///
     /// ```js

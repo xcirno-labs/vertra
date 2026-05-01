@@ -65,7 +65,7 @@ impl Scene {
         let id = unsafe {
             (*self.inner).spawn((*object.inner).clone(), parent_id)
         };
-        crate::world::drain_scene_graph_events();
+        crate::internals::mutation::drain_scene_graph_events();
         id
     }
 
