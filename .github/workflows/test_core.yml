@@ -47,7 +47,7 @@ jobs:
           node-version: '22'
 
       - name: Install wasm-pack
-        run: curl https://wasm-bindgen.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: curl https://wasm-bindgen.github.io/wasm-pack/installer/init.sh -sSf | bash
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -57,6 +57,5 @@ jobs:
           workspaces: "binder -> target"
 
       - name: Run Binder tests
-        run: |
-          cd binder
-          wasm-pack test --node
+        working-directory: ./binder
+        run: wasm-pack test --node
