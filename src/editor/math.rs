@@ -50,7 +50,7 @@ pub(crate) fn approx_half_extents(geom: &Option<Geometry>, t: &Transform) -> [f3
 /// positive `t` along the ray, or `None` on a miss.
 ///
 /// Unlike [`ray_sphere`], each axis is tested independently, so a box that
-/// was scaled only on X is only larger on X — not in every direction.
+/// was scaled only on X is only larger on X, not in every direction.
 pub(crate) fn ray_aabb(ro: [f32; 3], rd: [f32; 3], center: [f32; 3], half: [f32; 3]) -> Option<f32> {
     let mut t_min = f32::NEG_INFINITY;
     let mut t_max = f32::INFINITY;
@@ -60,7 +60,7 @@ pub(crate) fn ray_aabb(ro: [f32; 3], rd: [f32; 3], center: [f32; 3], half: [f32;
         let hi = center[i] + half[i];
 
         if rd[i].abs() < 1e-6 {
-            // Ray is parallel to this slab — miss if origin is outside.
+            // Ray is parallel to this slab, miss if origin is outside.
             if ro[i] < lo || ro[i] > hi { return None; }
         } else {
             let inv = 1.0 / rd[i];
@@ -150,7 +150,7 @@ pub(crate) fn collect_descendants(world: &World, id: usize, out: &mut Vec<usize>
     }
 }
 
-/// Returns only the "top-level" IDs — those whose ancestor is not also in
+/// Returns only the "top-level" IDs, those whose ancestor is not also in
 /// the set (prevents double-transforming children of a selected parent).
 pub(crate) fn filter_top_level_ids(world: &World, ids: &[usize]) -> Vec<usize> {
     let id_set: HashSet<usize> = ids.iter().cloned().collect();

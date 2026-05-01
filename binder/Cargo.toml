@@ -1,5 +1,5 @@
 [package]
-name = "vertra-js"
+name = "vertra_js"
 version = "0.1.0"
 edition = "2024"
 
@@ -12,5 +12,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 js-sys = "0.3.94"
 winit = "0.29.15"
 
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]

@@ -65,13 +65,31 @@ impl World {
         Self { objects, roots, next_id, name_handles, on_scene_graph_modified: None }
     }
 
-    pub fn spawn_object(&mut self, mut object: Object, parent_id: Option<usize>) -> usize {
+    pub fn spawn_object(&mut self, object: Object, parent_id: Option<usize>) -> usize {
+        let id = self.alloc_id();
+        self.insert_spawned(id, object, parent_id);
+        id
+    }
+
+    /// Reserve the next object ID without inserting any object.
+    ///
+    /// The ID is immediately retired from the counter so that a subsequent
+    /// call to [`spawn_object`] or another [`alloc_id`] will never return the
+    /// same value.  Used by the WASM binder to pre-allocate an ID for a
+    /// deferred spawn so the JS caller receives the future ID synchronously.
+    pub fn alloc_id(&mut self) -> usize {
         let id = self.next_id;
         self.next_id += 1;
+        id
+    }
 
-        // Validate parent: if the requested parent does not exist, fall back to
-        // root-level placement so the new object is always reachable for
-        // traversal/rendering and the hierarchy stays consistent.
+    /// Insert a pre-ID-allocated object into the world, wiring up the parent /
+    /// child / root links and firing the scene-graph callback.
+    ///
+    /// `id` **must** have been obtained from [`alloc_id`] and must not already
+    /// be present in [`World::objects`].  Callers that do not need to
+    /// pre-reserve an ID should use [`spawn_object`] instead.
+    pub fn insert_spawned(&mut self, id: usize, mut object: Object, parent_id: Option<usize>) {
         let resolved_parent = parent_id.filter(|p_id| self.objects.contains_key(p_id));
         if parent_id.is_some() && resolved_parent.is_none() {
             eprintln!(
@@ -83,13 +101,11 @@ impl World {
 
         self.name_handles.insert(object.str_id.clone(), id);
         object.parent = resolved_parent;
-        // If it has a parent, link the child to the parent
         if let Some(p_id) = resolved_parent {
             if let Some(parent_obj) = self.objects.get_mut(&p_id) {
                 parent_obj.children.push(id);
             }
         } else {
-            // If no parent, it's a root object
             self.roots.push(id);
         }
 
@@ -98,7 +114,6 @@ impl World {
         if let Some(cb) = &mut self.on_scene_graph_modified {
             (cb.0)(SceneGraphEvent::ObjectAdded { id, parent_id: resolved_parent });
         }
-        id
     }
 
     /// Returns the unique integer ID associated with a given string identifier (`str_id`).
