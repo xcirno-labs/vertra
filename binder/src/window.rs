@@ -9,6 +9,7 @@ use winit::event::{MouseButton, MouseScrollDelta};
 use vertra::editor::EditorEvent;
 use crate::camera::Camera;
 use crate::editor::WebEditorEvent;
+use crate::frame_stats::FrameStats;
 
 #[wasm_bindgen(start)]
 pub fn main_js() {
@@ -21,6 +22,16 @@ pub fn main_js() {
 pub struct FrameContext {
     /// Time elapsed since the last frame in seconds.
     pub dt: f32,
+    stats: FrameStats,
+}
+
+#[wasm_bindgen]
+impl FrameContext {
+    /// Smoothed frame statistics for the most recently committed sample window.
+    #[wasm_bindgen(getter)]
+    pub fn stats(&self) -> FrameStats {
+        self.stats.clone()
+    }
 }
 
 /// Represents an input event sent from the engine to the JavaScript handler.
@@ -130,11 +141,18 @@ impl WebWindow {
             Scene { inner: scene as *mut vertra::scene::Scene }
         }
 
+        fn wrap_frame_context(ctx: &vertra::window::FrameContext<'_>) -> FrameContext {
+            FrameContext {
+                dt: ctx.dt,
+                stats: FrameStats::from(ctx.stats),
+            }
+        }
+
         let user_startup = self.on_startup.take();
         engine_window = engine_window.on_startup(move |state, scene, _ctx| {
 
             if let Some(ref f) = user_startup {
-                let frame_ctx = FrameContext { dt: _ctx.dt };
+                let frame_ctx = wrap_frame_context(_ctx);
                 let _ = f.call3(
                     &JsValue::UNDEFINED,
                     state,
@@ -146,7 +164,7 @@ impl WebWindow {
 
         if let Some(f) = self.on_update {
             engine_window = engine_window.on_update(move |state, scene, _ctx| {
-                let frame_ctx = FrameContext { dt: _ctx.dt };
+                let frame_ctx = wrap_frame_context(_ctx);
                 let _ = f.call3(
                     &JsValue::UNDEFINED,
                     state,
@@ -158,7 +176,7 @@ impl WebWindow {
 
         if let Some(f) = self.on_draw_request {
             engine_window = engine_window.on_draw_request(move |state, scene, _ctx| {
-                let frame_ctx = FrameContext { dt: _ctx.dt };
+                let frame_ctx = wrap_frame_context(_ctx);
                 let _ = f.call3(
                     &JsValue::UNDEFINED,
                     state,

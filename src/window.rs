@@ -8,6 +8,7 @@ use crate::event::{
     MouseButton, MouseScrollDelta, ElementState, DeviceEvent,
 };
 use crate::pipeline::Pipeline;
+use crate::frame_stats::FrameStats;
 use crate::camera::Camera;
 use crate::mesh::MeshRegistry;
 use crate::scene::Scene;
@@ -20,11 +21,13 @@ use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::WindowBuilderExtWebSys;
 /// Per-frame timing information passed to every callback.
-pub struct FrameContext {
+pub struct FrameContext<'a> {
     /// Delta-time in seconds since the previous frame.
     pub dt: f32,
+    /// Smoothed frame statistics updated on a sampling window.
+    pub stats: &'a FrameStats,
 }
-type DrawCallback<S>             = Box<dyn FnMut(&mut S, &mut Scene, &mut FrameContext)>;
+type DrawCallback<S>             = Box<dyn for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>)>;
 type EventCallback<S>            = Box<dyn FnMut(&mut S, &mut Scene, Event<()>, &EventLoopWindowTarget<()>)>;
 type CloseCallback<S>            = Box<dyn FnMut(&mut S, WindowEvent, &EventLoopWindowTarget<()>)>;
 type EditorStateEventCallback<S> = Box<dyn FnMut(&mut S, &mut Scene, EditorStateEvent, Option<Object>)>;
@@ -44,6 +47,8 @@ pub struct WindowConfig {
     pub minimum_dimension: [u32; 2],
     /// *(WASM only)* `id` attribute of the `<canvas>` element to render into.
     pub canvas_id: Option<String>,
+    /// Sleep time between two frame stats.
+    pub stats_sample_window_secs: f32,
 }
 
 impl Default for WindowConfig {
@@ -54,6 +59,7 @@ impl Default for WindowConfig {
             height: window::DEFAULT_HEIGHT,
             minimum_dimension: window::MIN_DIMENSION,
             canvas_id: None,
+            stats_sample_window_secs: 0.5,
         }
     }
 }
@@ -136,6 +142,12 @@ impl<S> Window<S> {
         self.config.canvas_id = Some(id.into());
         self
     }
+    /// Set the time window (in seconds) over which frame statistics are averaged.
+    /// Defaults to 0.5 seconds.
+    pub fn with_stats_sample_window(mut self, secs: f32) -> Self {
+        self.config.stats_sample_window_secs = secs;
+        self
+    }
     /// Register a raw winit event handler that receives every [`Event`].
     ///
     /// This callback fires even in editor mode and is intended for advanced use
@@ -152,7 +164,7 @@ impl<S> Window<S> {
     /// > **Suppressed in editor mode.** Use [`on_editor_event`](Self::on_editor_event)
     /// > to react to editor-side changes.
     pub fn on_update<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
+    where F: for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>) + 'static {
         self.on_update_fn = Some(Box::new(function));
         self
     }
@@ -163,7 +175,7 @@ impl<S> Window<S> {
     ///
     /// > **Suppressed in editor mode.**
     pub fn on_fixed_update<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
+    where F: for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>) + 'static {
         self.on_fixed_update_fn = Some(Box::new(function));
         self
     }
@@ -172,7 +184,7 @@ impl<S> Window<S> {
     ///
     /// > **Suppressed in editor mode.**
     pub fn on_draw_request<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
+    where F: for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>) + 'static {
         self.on_draw_requested_fn = Some(Box::new(function));
         self
     }
@@ -207,7 +219,7 @@ impl<S> Window<S> {
     /// begins.  Use this to spawn objects, load assets, and optionally call
     /// [`Scene::enable_editor_mode`](crate::scene::Scene::enable_editor_mode).
     pub fn on_startup<F>(mut self, function: F) -> Self
-    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
+    where F: for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>) + 'static {
         self.on_startup_fn = Some(Box::new(function));
         self
     }
@@ -258,8 +270,14 @@ impl<S> Window<S> {
         pipeline: Pipeline,
         window_handle: Arc<winit::window::Window>,
     ) {
+        fn make_frame_context<'a>(dt: f32, stats: &'a FrameStats) -> FrameContext<'a> {
+            FrameContext { dt, stats }
+        }
+
         let mesh_registry = MeshRegistry::new();
         let mut last_update_inst = web_time::Instant::now();
+        let mut frame_stats = FrameStats::new()
+            .with_sample_window(self.config.stats_sample_window_secs);
         let camera = self.camera.unwrap_or_else(|| {
             Camera::new().with_aspect(self.config.width as f32 / self.config.height as f32)
         });
@@ -269,7 +287,7 @@ impl<S> Window<S> {
         // closure (and again when the closure is boxed for spawn_local on WASM).
         // Any raw pointer derived from `&mut scene` during on_startup would
         // therefore dangle after the first move.  With Box::new the contents
-        // never move — only the thin pointer does — so the address stays valid
+        // never move, only the thin pointer does, so the address stays valid
         // for the entire lifetime of the engine.
         let mut scene = Box::new(Scene {
             pipeline,
@@ -282,7 +300,7 @@ impl<S> Window<S> {
             script_registry: crate::script::ScriptRegistry::new(),
         });
         if let Some(startup_fn) = &mut self.on_startup_fn {
-            startup_fn(&mut self.state, &mut *scene, &mut FrameContext { dt: 0.0 });
+            startup_fn(&mut self.state, &mut *scene, &mut make_frame_context(0.0, &frame_stats));
         }
         let mut accumulator = 0.0_f32;
         let main_loop = move |event: Event<()>, elwt: &EventLoopWindowTarget<()>| {
@@ -293,7 +311,7 @@ impl<S> Window<S> {
             if scene.editor.is_none() {
                 scene.run_scripts(dt);
                 if let Some(f) = &mut self.on_update_fn {
-                    f(&mut self.state, &mut *scene, &mut FrameContext { dt });
+                    f(&mut self.state, &mut *scene, &mut make_frame_context(dt, &frame_stats));
                 }
             }
 
@@ -361,7 +379,11 @@ impl<S> Window<S> {
                         if scene.editor.is_none() {
                             scene.run_fixed_update_scripts(window::FIXED_DELTA);
                             if let Some(f) = &mut self.on_fixed_update_fn {
-                                f(&mut self.state, &mut *scene, &mut FrameContext { dt: window::FIXED_DELTA });
+                                f(
+                                    &mut self.state,
+                                    &mut *scene,
+                                    &mut make_frame_context(window::FIXED_DELTA, &frame_stats),
+                                );
                             }
                         }
                         accumulator -= window::FIXED_DELTA;
@@ -376,10 +398,12 @@ impl<S> Window<S> {
                         WindowEvent::RedrawRequested => {
                             if scene.editor.is_none() {
                                 if let Some(f) = &mut self.on_draw_requested_fn {
-                                    f(&mut self.state, &mut *scene, &mut FrameContext { dt });
+                                    f(&mut self.state, &mut *scene, &mut make_frame_context(dt, &frame_stats));
                                 }
                             }
-                            scene.draw_world();
+                            let render_stats = scene.draw_world();
+                            frame_stats.set_gpu_stats(render_stats.draw_calls, render_stats.triangle_count);
+                            frame_stats.tick(dt);
                         }
                         WindowEvent::Resized(new_size) => {
                             scene.pipeline.resize(new_size);

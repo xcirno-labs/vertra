@@ -21,6 +21,7 @@
 //! | [`constants`]     | Engine-wide default constants                                      |
 //! | [`event`]         | Re-exports of winit event types used throughout the API            |
 pub mod event;
+pub mod frame_stats;
 pub mod window;
 pub mod pipeline;
 pub mod mesh;

@@ -1,3 +1,5 @@
+#![cfg(target_arch = "wasm32")]
+
 /// Internal runtime machinery exposed only for integration testing.
 ///
 /// Nothing in this module is part of the public WASM API.  All items are
@@ -5,6 +7,7 @@
 #[doc(hidden)]
 pub mod internals;
 pub mod camera;
+pub mod frame_stats;
 pub mod window;
 pub mod objects;
 pub mod geometry;

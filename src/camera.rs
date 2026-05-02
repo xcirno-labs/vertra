@@ -226,7 +226,7 @@ impl Camera {
     ///
     /// Reads `W/A/S/D` from `keys` and moves the camera along the forward /
     /// right axes scaled by `speed * ctx.dt`.
-    pub fn handle_default_input(&mut self, keys: &HashSet<KeyCode>, speed: f32, ctx: &mut FrameContext) {
+    pub fn handle_default_input(&mut self, keys: &HashSet<KeyCode>, speed: f32, ctx: &mut FrameContext<'_>) {
         let (f, r) = self.get_directions();
         let mut move_dir = [0.0, 0.0, 0.0];
 
