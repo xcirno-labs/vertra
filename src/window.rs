@@ -9,25 +9,30 @@ use crate::event::{
 };
 use crate::pipeline::Pipeline;
 use crate::frame_stats::FrameStats;
-use crate::camera::Camera;
-use crate::mesh::MeshRegistry;
+use crate::camera::Camera;use crate::mesh::MeshRegistry;
 use crate::scene::Scene;
 use crate::editor::{EditorEvent, EditorStateEvent};
-use crate::constants::window;
+use crate::constants::{window, frame_stats};
 use crate::objects::Object;
 use crate::world::World;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::WindowBuilderExtWebSys;
-/// Per-frame timing information passed to every callback.
-pub struct FrameContext<'a> {
+/// Per-frame timing and performance information passed to every callback.
+pub struct FrameContext {
     /// Delta-time in seconds since the previous frame.
     pub dt: f32,
-    /// Smoothed frame statistics updated on a sampling window.
-    pub stats: &'a FrameStats,
+    /// Frames per second averaged over the configured sample window.
+    pub fps: f32,
+    /// Average frame time in milliseconds over the configured sample window.
+    pub frame_time_ms: f32,
+    /// Draw calls issued during the most recently rendered frame.
+    pub draw_calls: u32,
+    /// Triangles rendered during the most recently rendered frame.
+    pub triangle_count: u32,
 }
-type DrawCallback<S>             = Box<dyn for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>)>;
+type DrawCallback<S>             = Box<dyn FnMut(&mut S, &mut Scene, &mut FrameContext)>;
 type EventCallback<S>            = Box<dyn FnMut(&mut S, &mut Scene, Event<()>, &EventLoopWindowTarget<()>)>;
 type CloseCallback<S>            = Box<dyn FnMut(&mut S, WindowEvent, &EventLoopWindowTarget<()>)>;
 type EditorStateEventCallback<S> = Box<dyn FnMut(&mut S, &mut Scene, EditorStateEvent, Option<Object>)>;
@@ -36,6 +41,7 @@ type EditorStateEventCallback<S> = Box<dyn FnMut(&mut S, &mut Scene, EditorState
 ///
 /// Populated via [`Window`]'s builder methods; you would not normally construct
 /// this directly.
+#[non_exhaustive]
 pub struct WindowConfig {
     /// OS window title bar text.
     pub title: String,
@@ -59,7 +65,7 @@ impl Default for WindowConfig {
             height: window::DEFAULT_HEIGHT,
             minimum_dimension: window::MIN_DIMENSION,
             canvas_id: None,
-            stats_sample_window_secs: 0.5,
+            stats_sample_window_secs: frame_stats::DEFAULT_SAMPLE_WINDOW_SECS,
         }
     }
 }
@@ -142,9 +148,26 @@ impl<S> Window<S> {
         self.config.canvas_id = Some(id.into());
         self
     }
-    /// Set the time window (in seconds) over which frame statistics are averaged.
-    /// Defaults to 0.5 seconds.
+    /// Sets the time window (in seconds) over which frame statistics are averaged.
+    ///
+    /// The value must be a positive, finite number.
+    ///
+    /// # Panics
+    /// Panics if `secs` is not finite (e.g. `NaN`) or is less than or equal to zero.
+    ///
+    /// # Defaults
+    /// The default sample window is `0.5` seconds.
+    ///
+    /// # Examples
+    /// ```
+    /// let window = Window::new(()).with_stats_sample_window(0.5);
+    /// ```
     pub fn with_stats_sample_window(mut self, secs: f32) -> Self {
+        assert!(
+            secs.is_finite() && secs > 0.0,
+            "stats_sample_window_secs must be a positive finite number"
+        );
+
         self.config.stats_sample_window_secs = secs;
         self
     }
@@ -164,7 +187,7 @@ impl<S> Window<S> {
     /// > **Suppressed in editor mode.** Use [`on_editor_event`](Self::on_editor_event)
     /// > to react to editor-side changes.
     pub fn on_update<F>(mut self, function: F) -> Self
-    where F: for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>) + 'static {
+    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
         self.on_update_fn = Some(Box::new(function));
         self
     }
@@ -175,7 +198,7 @@ impl<S> Window<S> {
     ///
     /// > **Suppressed in editor mode.**
     pub fn on_fixed_update<F>(mut self, function: F) -> Self
-    where F: for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>) + 'static {
+    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
         self.on_fixed_update_fn = Some(Box::new(function));
         self
     }
@@ -184,7 +207,7 @@ impl<S> Window<S> {
     ///
     /// > **Suppressed in editor mode.**
     pub fn on_draw_request<F>(mut self, function: F) -> Self
-    where F: for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>) + 'static {
+    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
         self.on_draw_requested_fn = Some(Box::new(function));
         self
     }
@@ -219,7 +242,7 @@ impl<S> Window<S> {
     /// begins.  Use this to spawn objects, load assets, and optionally call
     /// [`Scene::enable_editor_mode`](crate::scene::Scene::enable_editor_mode).
     pub fn on_startup<F>(mut self, function: F) -> Self
-    where F: for<'a> FnMut(&mut S, &mut Scene, &mut FrameContext<'a>) + 'static {
+    where F: FnMut(&mut S, &mut Scene, &mut FrameContext) + 'static {
         self.on_startup_fn = Some(Box::new(function));
         self
     }
@@ -270,8 +293,14 @@ impl<S> Window<S> {
         pipeline: Pipeline,
         window_handle: Arc<winit::window::Window>,
     ) {
-        fn make_frame_context<'a>(dt: f32, stats: &'a FrameStats) -> FrameContext<'a> {
-            FrameContext { dt, stats }
+        fn make_frame_context(dt: f32, stats: &FrameStats) -> FrameContext {
+            FrameContext {
+                dt,
+                fps: stats.fps,
+                frame_time_ms: stats.frame_time_ms,
+                draw_calls: stats.draw_calls,
+                triangle_count: stats.triangle_count,
+            }
         }
 
         let mesh_registry = MeshRegistry::new();

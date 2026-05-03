@@ -1,25 +1,29 @@
-//! Per-frame performance statistics with a given sampling window.
+//! Internal per-frame performance tracker.
 //!
-//! [`FrameStats`] counts rendered frames and uses real elapsed wall-clock time
-//! for its given sample window. Every given seconds, the accumulated data is
-//! "committed" into the public fields so callers see a stable value rather
-//! than per-frame jitter.
+//! [`FrameStats`] is a crate-private accumulator that counts rendered frames
+//! and uses real elapsed wall-clock time to commit smoothed values once the
+//! configured sample window has elapsed.  The committed values are copied
+//! into the public [`FrameContext`](crate::window::FrameContext) fields that
+//! are handed to every callback.
 
-use crate::constants::frame_stats::SAMPLE_WINDOW_SECS_DEFAULT;
+use crate::constants::frame_stats::DEFAULT_SAMPLE_WINDOW_SECS;
 
-/// Smoothed performance counters.
+/// Crate-internal smoothed performance counter.
 ///
-/// Access these through [`FrameContext::stats`](crate::window::FrameContext).
+/// The committed public values (`fps`, `frame_time_ms`, `draw_calls`,
+/// `triangle_count`) are exposed directly on
+/// [`FrameContext`](crate::window::FrameContext), this type is not part of
+/// the public API.
 #[derive(Debug, Clone)]
-pub struct FrameStats {
+pub(crate) struct FrameStats {
     /// Frames per second, averaged over the last given window.
-    pub fps: f32,
+    pub(crate) fps: f32,
     /// Average frame time in milliseconds over the last given window.
-    pub frame_time_ms: f32,
-    /// Number of draw calls issued in the most recent committed window.
-    pub draw_calls: u32,
-    /// Number of triangles rendered in the most recent committed window.
-    pub triangle_count: u32,
+    pub(crate) frame_time_ms: f32,
+    /// Number of draw calls issued in the most recently rendered frame.
+    pub(crate) draw_calls: u32,
+    /// Number of triangles rendered in the most recently rendered frame.
+    pub(crate) triangle_count: u32,
 
     /// Timestamp of the start of the current accumulation window.
     pub(crate) last_sample_time: web_time::Instant,
@@ -30,8 +34,7 @@ pub struct FrameStats {
 }
 
 impl FrameStats {
-    /// Create a new `FrameStats` with all counters zeroed.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             fps: 0.0,
             frame_time_ms: 0.0,
@@ -39,20 +42,19 @@ impl FrameStats {
             triangle_count: 0,
             last_sample_time: web_time::Instant::now(),
             frames_collected: 0,
-            sample_window_secs: SAMPLE_WINDOW_SECS_DEFAULT,
+            sample_window_secs: DEFAULT_SAMPLE_WINDOW_SECS,
         }
     }
-    /// Builder method to override the default sample window
-    pub fn with_sample_window(mut self, secs: f32) -> Self {
+    pub(crate) fn with_sample_window(mut self, secs: f32) -> Self {
         self.sample_window_secs = secs;
         self
     }
 
     /// Record one frame with the given delta-time `dt` (seconds).
     ///
-    /// When the accumulated window exceeds [`SAMPLE_WINDOW_SECS`] the public
+    /// When the accumulated window exceeds [`DEFAULT_SAMPLE_WINDOW_SECS`] the public
     /// fields are updated and the window resets.
-    pub fn tick(&mut self, _dt: f32) {
+    pub(crate) fn tick(&mut self, _dt: f32) {
         let now = web_time::Instant::now();
         self.frames_collected += 1;
         let sample_elapsed = now.duration_since(self.last_sample_time).as_secs_f32();
@@ -69,7 +71,7 @@ impl FrameStats {
     ///
     /// These are passed through directly (not smoothed) and reflect the last
     /// frame's GPU workload as reported by the renderer.
-    pub fn set_gpu_stats(&mut self, draw_calls: u32, triangle_count: u32) {
+    pub(crate) fn set_gpu_stats(&mut self, draw_calls: u32, triangle_count: u32) {
         self.draw_calls     = draw_calls;
         self.triangle_count = triangle_count;
     }
@@ -80,5 +82,3 @@ impl Default for FrameStats {
         Self::new()
     }
 }
-
-

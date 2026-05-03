@@ -6,7 +6,6 @@
 #[doc(hidden)]
 pub mod internals;
 pub mod camera;
-pub mod frame_stats;
 pub mod window;
 pub mod objects;
 pub mod geometry;

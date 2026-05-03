@@ -1,7 +1,7 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use crate::frame_stats::FrameStats;
-use crate::constants::frame_stats::SAMPLE_WINDOW_SECS_DEFAULT;
+use crate::constants::frame_stats::DEFAULT_SAMPLE_WINDOW_SECS;
 use crate::window::Window;
 
 fn make_stats() -> FrameStats {
@@ -25,7 +25,7 @@ fn commit_happens_once_half_second_window_is_reached() {
     let mut stats = make_stats();
 
     let start = Instant::now();
-    while start.elapsed().as_secs_f32() < SAMPLE_WINDOW_SECS_DEFAULT + 0.05 {
+    while start.elapsed().as_secs_f32() < DEFAULT_SAMPLE_WINDOW_SECS + 0.05 {
         stats.tick(1.0 / 60.0);
         sleep(Duration::from_millis(16));
     }
@@ -44,7 +44,7 @@ fn committed_values_stay_stable_until_the_next_window() {
     let mut stats = make_stats();
 
     let start = Instant::now();
-    while start.elapsed().as_secs_f32() < SAMPLE_WINDOW_SECS_DEFAULT + 0.05 {
+    while start.elapsed().as_secs_f32() < DEFAULT_SAMPLE_WINDOW_SECS + 0.05 {
         stats.tick(1.0 / 60.0);
         sleep(Duration::from_millis(16));
     }
@@ -66,7 +66,7 @@ fn gpu_stats_survive_until_the_time_window_commits() {
 
     stats.set_gpu_stats(12, 8_000);
     let start = Instant::now();
-    while start.elapsed().as_secs_f32() < SAMPLE_WINDOW_SECS_DEFAULT + 0.05 {
+    while start.elapsed().as_secs_f32() < DEFAULT_SAMPLE_WINDOW_SECS + 0.05 {
         stats.tick(1.0 / 60.0);
         sleep(Duration::from_millis(16));
     }
@@ -113,7 +113,7 @@ fn custom_sample_window_delays_commit() {
     let start = Instant::now();
 
     // Wait past the default 0.5s window, but BEFORE our custom 0.8s window
-    while start.elapsed().as_secs_f32() < SAMPLE_WINDOW_SECS_DEFAULT + 0.1 {
+    while start.elapsed().as_secs_f32() < DEFAULT_SAMPLE_WINDOW_SECS + 0.1 {
         stats.tick(1.0 / 60.0);
         sleep(Duration::from_millis(16));
     }
@@ -142,7 +142,7 @@ fn custom_sample_window_delays_commit() {
 fn window_uses_default_stats_sample_window() {
     let window = Window::new(());
 
-    assert_eq!(window.config.stats_sample_window_secs, SAMPLE_WINDOW_SECS_DEFAULT);
+    assert_eq!(window.config.stats_sample_window_secs, DEFAULT_SAMPLE_WINDOW_SECS);
 }
 
 #[test]
