@@ -44,3 +44,8 @@ pub mod pipeline {
     /// Initial capacity of the GPU index buffer in indices.
     pub const INITIAL_INDEX_LIMIT: u32 = 1024;
 }
+
+pub mod frame_stats {
+    /// Width of the sampling window in seconds.
+    pub const DEFAULT_SAMPLE_WINDOW_SECS: f32 = 0.5;
+}

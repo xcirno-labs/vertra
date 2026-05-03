@@ -15,6 +15,12 @@ pub struct PipelineConfig {
     pub initial_vertex_buffer_size: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RenderStats {
+    pub draw_calls: u32,
+    pub triangle_count: u32,
+}
+
 pub struct Pipeline {
     pub render_pipeline: wgpu::RenderPipeline,
     /// Depth = Always, no culling, no depth-write.
@@ -303,11 +309,11 @@ impl Pipeline {
         world_batches: &[(&BakedMesh, &wgpu::BindGroup)],
         skybox: Option<&BakedMesh>,
         overlay: Option<&BakedMesh>,
-    ) {
+    ) -> RenderStats {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f)    => f,
             wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            _ => return,
+            _ => return RenderStats::default(),
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -315,6 +321,7 @@ impl Pipeline {
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_mat.data]));
 
         let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let mut stats = RenderStats::default();
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -344,6 +351,8 @@ impl Pipeline {
                     rp.set_vertex_buffer(0, sky.vertex_buffer.slice(..));
                     rp.set_index_buffer(sky.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     rp.draw_indexed(0..sky.index_count, 0, 0..1);
+                    stats.draw_calls += 1;
+                    stats.triangle_count += sky.index_count / 3;
                 }
             }
 
@@ -355,6 +364,8 @@ impl Pipeline {
                     rp.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     rp.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     rp.draw_indexed(0..mesh.index_count, 0, 0..1);
+                    stats.draw_calls += 1;
+                    stats.triangle_count += mesh.index_count / 3;
                 }
             }
 
@@ -366,12 +377,15 @@ impl Pipeline {
                     rp.set_vertex_buffer(0, ov.vertex_buffer.slice(..));
                     rp.set_index_buffer(ov.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     rp.draw_indexed(0..ov.index_count, 0, 0..1);
+                    stats.draw_calls += 1;
+                    stats.triangle_count += ov.index_count / 3;
                 }
             }
         }
 
         self.queue.submit(std::iter::once(enc.finish()));
         frame.present();
+        stats
     }
 
     pub fn render_baked_mesh(&self, mesh: &BakedMesh, camera: &Camera) {

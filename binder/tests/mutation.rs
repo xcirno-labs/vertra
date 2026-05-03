@@ -1,3 +1,4 @@
+#![cfg(target_arch = "wasm32")]
 //! Integration tests for the deferred world-mutation system.
 //!
 //! These tests live in `binder/tests/` (a separate compilation unit) and

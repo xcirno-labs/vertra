@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use crate::camera::Camera;
 use crate::editor::{EditorEvent, EditorState, InspectorData};
 use crate::mesh::{MeshData, MeshRegistry};
-use crate::pipeline::Pipeline;
+use crate::pipeline::{Pipeline, RenderStats};
 use crate::world::World;
 use crate::objects::Object;
 use crate::transform::Transform;
@@ -125,7 +125,7 @@ impl Scene {
     ///
     /// Called automatically by [`crate::window::Window`] every frame on
     /// `RedrawRequested`.  You do not normally need to call this manually.
-    pub fn draw_world(&mut self) {
+    pub fn draw_world(&mut self) -> RenderStats {
         // Group object geometry by texture_path so we minimise bind-group switches.
         let mut groups: HashMap<Option<String>, MeshData> = HashMap::new();
         let identity = Transform::default();
@@ -160,7 +160,7 @@ impl Scene {
 
         let camera = &self.camera;
         let skybox = self.editor.as_ref().and_then(|ed| ed.skybox.as_ref());
-        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref());
+        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref())
     }
 
     /// Switch into static editor mode.
