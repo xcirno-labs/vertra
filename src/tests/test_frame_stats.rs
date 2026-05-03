@@ -1,6 +1,8 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use crate::frame_stats::{FrameStats, SAMPLE_WINDOW_SECS_DEFAULT};
+use crate::frame_stats::FrameStats;
+use crate::constants::frame_stats::SAMPLE_WINDOW_SECS_DEFAULT;
+use crate::window::Window;
 
 fn make_stats() -> FrameStats {
     FrameStats::new()
@@ -136,3 +138,16 @@ fn custom_sample_window_delays_commit() {
     );
 }
 
+#[test]
+fn window_uses_default_stats_sample_window() {
+    let window = Window::new(());
+
+    assert_eq!(window.config.stats_sample_window_secs, SAMPLE_WINDOW_SECS_DEFAULT);
+}
+
+#[test]
+fn builder_overrides_stats_sample_window() {
+    let window = Window::new(()).with_stats_sample_window(0.25);
+
+    assert_eq!(window.config.stats_sample_window_secs, 0.25);
+}

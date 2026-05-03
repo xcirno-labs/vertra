@@ -1,15 +1,16 @@
 use wasm_bindgen::prelude::*;
-use vertra::window::Window;
-use vertra::event::{DeviceEvent, ElementState, PhysicalKey};
 use crate::scene::Scene;
-use vertra::event::{Event, WindowEvent};
 use js_sys::Function;
 use serde::Serialize;
 use winit::event::{MouseButton, MouseScrollDelta};
-use vertra::editor::EditorEvent;
 use crate::camera::Camera;
 use crate::editor::WebEditorEvent;
 use crate::frame_stats::FrameStats;
+
+use vertra::window::Window;
+use vertra::event::{DeviceEvent, ElementState, PhysicalKey, Event, WindowEvent};
+use vertra::editor::EditorEvent;
+use vertra::constants::frame_stats::SAMPLE_WINDOW_SECS_DEFAULT;
 
 #[wasm_bindgen(start)]
 pub fn main_js() {
@@ -60,6 +61,7 @@ pub enum WebEvent {
 pub struct WebWindow {
     state: JsValue,
     camera: Camera,
+    stats_sample_window_secs: f32,
     on_update: Option<Function>,
     on_draw_request: Option<Function>,
     on_startup: Option<Function>,
@@ -78,12 +80,23 @@ impl WebWindow {
         Self {
             state: state.unwrap_or(JsValue::NULL),
             camera,
+            stats_sample_window_secs: SAMPLE_WINDOW_SECS_DEFAULT,
             on_update: None,
             on_draw_request: None,
             on_startup: None,
             on_editor_event: None,
             with_event_handler: None,
         }
+    }
+
+    /// Sets the time window, in seconds, used to smooth frame statistics.
+    ///
+    /// Longer windows produce steadier FPS and frame-time readings, while
+    /// shorter windows react more quickly to performance changes.
+    ///
+    /// Defaults to `0.5` seconds.
+    pub fn with_stats_sample_window(&mut self, secs: f32) {
+        self.stats_sample_window_secs = secs;
     }
 
     /// Sets the function to call every frame for logic updates.
@@ -134,7 +147,8 @@ impl WebWindow {
         let mut engine_window = Window::new(self.state)
             .with_title("Vertra Web")
             .with_canvas_id(canvas_id)
-            .with_camera(camera_val);
+            .with_camera(camera_val)
+            .with_stats_sample_window(self.stats_sample_window_secs);
 
         // We can't move a reference into an owned Wasm struct.
         unsafe fn wrap_scene(scene: &mut vertra::scene::Scene) -> Scene {

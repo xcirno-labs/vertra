@@ -5,7 +5,9 @@
 //! "committed" into the public fields so callers see a stable value rather
 //! than per-frame jitter.
 
-/// Smoothed performance counters, updated at most twice per second.
+use crate::constants::frame_stats::SAMPLE_WINDOW_SECS_DEFAULT;
+
+/// Smoothed performance counters.
 ///
 /// Access these through [`FrameContext::stats`](crate::window::FrameContext).
 #[derive(Debug, Clone)]
@@ -26,9 +28,6 @@ pub struct FrameStats {
     /// Sleep time between frame stats.
     pub(crate) sample_window_secs: f32,
 }
-
-/// Width of the sampling window in seconds.
-pub const SAMPLE_WINDOW_SECS_DEFAULT: f32 = 0.5;
 
 impl FrameStats {
     /// Create a new `FrameStats` with all counters zeroed.

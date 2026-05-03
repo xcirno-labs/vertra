@@ -23,13 +23,19 @@ impl From<&vertra::frame_stats::FrameStats> for FrameStats {
 
 #[wasm_bindgen]
 impl FrameStats {
-    /// Frames per second averaged over the last 0.5-second sample window.
+    /// Frames per second averaged over the current sample window.
+    ///
+    /// By default, the window is `0.5` seconds, and it can be changed through
+    /// [`WebWindow::with_stats_sample_window`](crate::window::WebWindow::with_stats_sample_window).
     #[wasm_bindgen(getter)]
     pub fn fps(&self) -> f32 {
         self.fps
     }
 
-    /// Average frame time in milliseconds over the last 0.5-second sample window.
+    /// Average frame time in milliseconds over the current sample window.
+    ///
+    /// By default, the window is `0.5` seconds, and it can be changed through
+    /// [`WebWindow::with_stats_sample_window`](crate::window::WebWindow::with_stats_sample_window).
     #[wasm_bindgen(getter)]
     pub fn frame_time_ms(&self) -> f32 {
         self.frame_time_ms

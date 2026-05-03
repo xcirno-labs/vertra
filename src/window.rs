@@ -87,7 +87,7 @@ impl Default for WindowConfig {
 pub struct Window<S: 'static> {
     pub handle: Option<Arc<winit::window::Window>>,
     state: S,
-    config: WindowConfig,
+    pub(crate) config: WindowConfig,
     event_handler: Option<EventCallback<S>>,
     on_window_close_fn: CloseCallback<S>,
     on_update_fn: Option<DrawCallback<S>>,
