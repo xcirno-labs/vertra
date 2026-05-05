@@ -14,3 +14,4 @@ pub mod transform;
 pub mod scene;
 pub mod editor;
 pub mod script;
+pub mod text_overlay;

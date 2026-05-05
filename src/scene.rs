@@ -3,6 +3,7 @@ use crate::camera::Camera;
 use crate::editor::{EditorEvent, EditorState, InspectorData};
 use crate::mesh::{MeshData, MeshRegistry};
 use crate::pipeline::{Pipeline, RenderStats};
+use crate::text_overlay::TextOverlay;
 use crate::world::World;
 use crate::objects::Object;
 use crate::transform::Transform;
@@ -55,6 +56,9 @@ pub struct Scene {
     /// Per-object script registry.  Kept separate from `World` so scripts
     /// never affect serialisation.
     pub script_registry: ScriptRegistry,
+    /// Screen-space text overlay.  Labels added here are rendered on top of
+    /// the 3D scene every frame regardless of camera position.
+    pub text_overlay: TextOverlay,
 }
 
 impl Scene {
@@ -158,9 +162,20 @@ impl Scene {
             .and_then(|ed| ed.gizmo_overlay_for_selection(&self.world, &self.camera))
             .map(|(v, i)| self.pipeline.create_baked_mesh(&v, &i));
 
+        // Build screen-space text quads for Layer 4.
+        let text_quads: Vec<crate::pipeline::TextQuad> = self.text_overlay.labels()
+            .iter()
+            .filter(|l| l.visible)
+            .filter_map(|label| {
+                let (pixels, w, h) = self.text_overlay.rasterize_label(label)?;
+                if w == 0 || h == 0 || pixels.is_empty() { return None; }
+                Some(self.pipeline.create_text_quad(label.x, label.y, w, h, &pixels))
+            })
+            .collect();
+
         let camera = &self.camera;
         let skybox = self.editor.as_ref().and_then(|ed| ed.skybox.as_ref());
-        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref())
+        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref(), &text_quads)
     }
 
     /// Switch into static editor mode.

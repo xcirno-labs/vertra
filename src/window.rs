@@ -327,6 +327,7 @@ impl<S> Window<S> {
             textures: std::collections::HashMap::new(),
             snapshot: None,
             script_registry: crate::script::ScriptRegistry::new(),
+            text_overlay: crate::text_overlay::TextOverlay::new(),
         });
         if let Some(startup_fn) = &mut self.on_startup_fn {
             startup_fn(&mut self.state, &mut *scene, &mut make_frame_context(0.0, &frame_stats));

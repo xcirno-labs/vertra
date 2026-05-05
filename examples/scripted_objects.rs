@@ -28,7 +28,7 @@ use vertra::objects::Object;
 use vertra::scene::Scene;
 use vertra::script::ObjectScript;
 use vertra::transform::Transform;
-use vertra::window::{FrameContext, Window};
+use vertra::window::{Window};
 use vertra::world::World;
 use vertra::event::{Event, WindowEvent, DeviceEvent, ElementState};
 use winit::keyboard::{KeyCode, PhysicalKey};

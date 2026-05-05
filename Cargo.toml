@@ -19,7 +19,20 @@ exclude = [
     "src/tests/",
 ]
 
+[features]
+## Bundle a common sans / serif / mono font stack so text labels work
+## out-of-the-box without any manual `add_font` call.
+##
+## Drop your font files into `src/fonts/`:
+##   sans.ttf   - default sans-serif (e.g. Roboto, Inter, NotoSans)
+##   serif.ttf  - serif variant      (e.g. RobotoSlab, NotoSerif)
+##   mono.ttf   - monospace variant  (e.g. RobotoMono, JetBrainsMono)
+##
+## Font indices are exposed as `vertra::text_overlay::DefaultFont::{Sans,Serif,Mono}`.
+default-fonts = []
+
 [dependencies]
+fontdue = "0.9"
 winit = "0.29.15"
 wgpu = { version = "29.0.1", features = ["webgl"] }
 pollster = "0.3"
