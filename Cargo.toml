@@ -28,7 +28,9 @@ exclude = [
 ##   serif.ttf  - serif variant      (e.g. RobotoSlab, NotoSerif)
 ##   mono.ttf   - monospace variant  (e.g. RobotoMono, JetBrainsMono)
 ##
-## Font indices are exposed as `vertra::text_overlay::DefaultFont::{Sans,Serif,Mono}`.
+## Built-in font variants are exposed as
+## `vertra::text_overlay::DefaultFont::{Sans,Serif,Mono}`, and their
+## string IDs are available via `DefaultFont::id()`.
 default-fonts = []
 
 [dependencies]

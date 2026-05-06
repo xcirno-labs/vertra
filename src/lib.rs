@@ -20,8 +20,8 @@
 //! | [`vtr`]           | Binary `.vtr` scene serialization format                           |
 //! | [`constants`]     | Engine-wide default constants                                      |
 //! | [`event`]         | Re-exports of winit event types used throughout the API            |
-//! | [`text_label`]    | Individual screen-space text label structures
-//! | [`text_overlay`]  | Screen-space text overlay management
+//! | [`text_label`]    | Individual screen-space text label structures                      |
+//! | [`text_overlay`]  | Screen-space text overlay management                               |
 pub mod event;
 pub(crate) mod frame_stats;
 pub mod window;

@@ -36,9 +36,10 @@ pub struct TextOverlay {
 impl TextOverlay {
     /// Load a TrueType / OpenType font from raw bytes, registered under `font_id`.
     ///
-    /// Pass the same `font_id` string to [`add_text_label_with_font`] or
-    /// [`set_text_label_font`] to select this face.  Returns a JS error string
-    /// on failure (empty id, duplicate id, or parse error).
+    /// Pass the same `font_id` string to [`TextOverlay::add_label`] to create a
+    /// label with this face, or use [`TextLabel::font`] on an existing label to
+    /// switch to it. Returns a JS error string on failure (empty id, duplicate
+    /// id, or parse error).
     pub fn load_font(&mut self, font_id: &str, font_bytes: &[u8]) -> Result<(), JsValue> {
         unsafe {
             (*self.inner).add_font(font_id, font_bytes)
@@ -103,7 +104,8 @@ impl TextOverlay {
 
 /// A handle to a single screen-space text label.
 ///
-/// Returned by [`TextOverlay::add_label`] / [`TextOverlay::add_label_with_font`].
+/// Returned by [`TextOverlay::add_label`]. To use a specific font, pass the
+/// optional `font_id` argument to `add_label`.
 /// Use JS property setters to mutate the label in place:
 ///
 /// ```js
