@@ -21,6 +21,17 @@ pub struct RenderStats {
     pub triangle_count: u32,
 }
 
+/// A prepared text quad ready to be submitted to the GPU text pass.
+pub struct TextQuad {
+    /// Baked screen-space mesh (two triangles).
+    pub mesh: BakedMesh,
+    /// Bind group pointing at the RGBA glyph texture for this label.
+    pub bind_group: wgpu::BindGroup,
+    /// Keep the texture alive as long as the bind group is alive.
+    #[allow(dead_code)]
+    pub texture: wgpu::Texture,
+}
+
 pub struct Pipeline {
     pub render_pipeline: wgpu::RenderPipeline,
     /// Depth = Always, no culling, no depth-write.
@@ -33,6 +44,10 @@ pub struct Pipeline {
     pub surface_config: wgpu::SurfaceConfiguration,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    /// Orthographic projection buffer for screen-space text rendering.
+    ortho_buffer: wgpu::Buffer,
+    /// Bind group for the ortho projection (same layout as the perspective one).
+    ortho_bind_group: wgpu::BindGroup,
     depth_view: wgpu::TextureView,
     /// Bind group layout for `@group(1)` (texture + sampler).
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
@@ -126,6 +141,22 @@ impl Pipeline {
                 resource: camera_buffer.as_entire_binding(),
             }],
             label: Some("camera_bind_group"),
+        });
+
+        // Orthographic projection buffer (screen-space text overlay, Layer 4).
+        let ortho_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Ortho Uniform Buffer"),
+            size: size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let ortho_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: ortho_buffer.as_entire_binding(),
+            }],
+            label: Some("ortho_bind_group"),
         });
 
         // Texture bind group layout (group 1)
@@ -290,6 +321,8 @@ impl Pipeline {
             surface_config,
             camera_buffer,
             camera_bind_group,
+            ortho_buffer,
+            ortho_bind_group,
             depth_view,
             texture_bind_group_layout,
             default_texture_bind_group,
@@ -297,18 +330,21 @@ impl Pipeline {
         }
     }
 
-    /// Render in three layers within a single render pass.
+    /// Render in four layers within two render passes.
     ///
     /// * `world_batches` - slice of `(mesh, texture_bind_group)` pairs for scene objects.
     ///   Each pair may carry a different texture; they are all rendered with the main pipeline.
     /// * `skybox`  - rendered first with the overlay pipeline (depth=Always, no depth-write).
     /// * `overlay` - rendered last with the overlay pipeline (gizmos, always on top).
+    /// * `text_quads` - screen-space text quads rendered after the 3D scene using an
+    ///   orthographic projection (Layer 4).  Pass an empty slice when unused.
     pub fn render_scene(
         &self,
         camera: &Camera,
         world_batches: &[(&BakedMesh, &wgpu::BindGroup)],
         skybox: Option<&BakedMesh>,
         overlay: Option<&BakedMesh>,
+        text_quads: &[&TextQuad],
     ) -> RenderStats {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f)    => f,
@@ -383,13 +419,55 @@ impl Pipeline {
             }
         }
 
+        // Layer 4: Screen-space text overlay (orthographic projection, separate pass).
+        if !text_quads.is_empty() {
+            let w = self.surface_config.width  as f32;
+            let h = self.surface_config.height as f32;
+            let ortho = build_ortho_matrix(w, h);
+            self.queue.write_buffer(&self.ortho_buffer, 0, bytemuck::cast_slice(&[ortho]));
+
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Text Overlay Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            rp.set_pipeline(&self.overlay_pipeline);
+            rp.set_bind_group(0, &self.ortho_bind_group, &[]);
+            for quad in text_quads {
+                if quad.mesh.index_count > 0 {
+                    rp.set_bind_group(1, &quad.bind_group, &[]);
+                    rp.set_vertex_buffer(0, quad.mesh.vertex_buffer.slice(..));
+                    rp.set_index_buffer(quad.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    rp.draw_indexed(0..quad.mesh.index_count, 0, 0..1);
+                    stats.draw_calls += 1;
+                    stats.triangle_count += quad.mesh.index_count / 3;
+                }
+            }
+        }
+
         self.queue.submit(std::iter::once(enc.finish()));
         frame.present();
         stats
     }
 
     pub fn render_baked_mesh(&self, mesh: &BakedMesh, camera: &Camera) {
-        self.render_scene(camera, &[(mesh, &self.default_texture_bind_group)], None, None);
+        self.render_scene(camera, &[(mesh, &self.default_texture_bind_group)], None, None, &[] as &[&TextQuad]);
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -463,4 +541,73 @@ impl Pipeline {
         });
         (texture, bind_group)
     }
+
+    /// Create a [`TextQuad`] from raw RGBA8 pixels and a screen-space position.
+    ///
+    /// `x`, `y`, `tex_width`, `tex_height` are all in pixel coordinates.
+    /// The returned [`TextQuad`] owns its GPU resources and may be reused across
+    /// frames for as long as you keep it. Re-create it when the underlying text
+    /// image changes (for example, when the label changes), or drop it when it is
+    /// no longer needed.
+    pub fn create_text_quad(
+        &self,
+        x: f32,
+        y: f32,
+        tex_width: u32,
+        tex_height: u32,
+        rgba_data: &[u8],
+    ) -> TextQuad {
+        use crate::text_overlay::TextOverlay;
+        use wgpu::util::DeviceExt;
+
+        let (verts, indices) = TextOverlay::build_quad(x, y, tex_width as f32, tex_height as f32);
+        let mesh = self.create_baked_mesh(&verts, &indices);
+
+        let texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Text Label Texture"),
+                size: wgpu::Extent3d { width: tex_width, height: tex_height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::default(),
+            rgba_data,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Text Label Bind Group"),
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.default_sampler) },
+            ],
+        });
+
+        TextQuad { mesh, bind_group, texture }
+    }
+}
+
+/// Build a column-major 4×4 orthographic projection matrix that maps pixel
+/// coordinates `(0, 0)` (top-left) to NDC `(-1, 1)` and
+/// `(width, height)` (bottom-right) to NDC `(1, -1)`.
+///
+/// The z-axis is left unchanged (identity), which is fine since all text
+/// quads are placed at `z = 0`.
+pub fn build_ortho_matrix(width: f32, height: f32) -> [[f32; 4]; 4] {
+    // Column-major, same memory layout as WGSL mat4x4<f32>.
+    // col 0: (2/w, 0,     0, 0)
+    // col 1: (0,   -2/h,  0, 0)
+    // col 2: (0,   0,     1, 0)
+    // col 3: (-1,  1,     0, 1)
+    [
+        [2.0 / width,  0.0,           0.0, 0.0],
+        [0.0,          -2.0 / height, 0.0, 0.0],
+        [0.0,          0.0,           1.0, 0.0],
+        [-1.0,         1.0,           0.0, 1.0],
+    ]
 }

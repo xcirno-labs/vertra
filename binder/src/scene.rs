@@ -6,6 +6,7 @@ use crate::world::World;
 use crate::camera::Camera;
 use crate::editor::Editor;
 use crate::script::WasmScript;
+use crate::text_overlay::TextOverlay;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_TEXTURE: &'static str = r#"
@@ -91,6 +92,18 @@ impl Scene {
             Camera {
                 inner: &mut (*self.inner).camera as *mut vertra::camera::Camera,
                 owned: false,
+            }
+        }
+    }
+
+    /// Returns a handle to the screen-space text overlay.
+    ///
+    /// Use it to load fonts and create / mutate text labels.
+    #[wasm_bindgen(getter)]
+    pub fn text_overlay(&self) -> TextOverlay {
+        unsafe {
+            TextOverlay {
+                inner: &mut (*self.inner).text_overlay as *mut vertra::text_overlay::TextOverlay,
             }
         }
     }

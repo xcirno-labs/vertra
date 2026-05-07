@@ -26,8 +26,11 @@ jobs:
         with:
           shared-key: "rust-ci-cache"
 
-      - name: Run tests
-        run: cargo test --lib --bins --tests --verbose
+      - name: Run tests with no features
+        run: cargo test --no-default-features --lib --bins --tests --verbose
+
+      - name: Run tests with all features
+        run: cargo test --all-features --lib --bins --tests --verbose feature_
 
   binder-test:
     name: Binder Node Tests
