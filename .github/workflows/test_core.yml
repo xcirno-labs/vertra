@@ -27,7 +27,7 @@ jobs:
           shared-key: "rust-ci-cache"
 
       - name: Run tests
-        run: cargo test --lib --bins --tests --verbose
+        run: cargo test --all-features --lib --bins --tests --verbose
 
   binder-test:
     name: Binder Node Tests

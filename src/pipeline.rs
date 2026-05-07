@@ -344,7 +344,7 @@ impl Pipeline {
         world_batches: &[(&BakedMesh, &wgpu::BindGroup)],
         skybox: Option<&BakedMesh>,
         overlay: Option<&BakedMesh>,
-        text_quads: &[TextQuad],
+        text_quads: &[&TextQuad],
     ) -> RenderStats {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f)    => f,
@@ -467,7 +467,7 @@ impl Pipeline {
     }
 
     pub fn render_baked_mesh(&self, mesh: &BakedMesh, camera: &Camera) {
-        self.render_scene(camera, &[(mesh, &self.default_texture_bind_group)], None, None, &[]);
+        self.render_scene(camera, &[(mesh, &self.default_texture_bind_group)], None, None, &[] as &[&TextQuad]);
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {

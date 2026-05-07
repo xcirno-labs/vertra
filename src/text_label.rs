@@ -59,6 +59,10 @@ pub struct TextLabel {
     /// String ID of the font to use (see [`crate::text_overlay::TextOverlay::add_font`]).
     /// An empty string means "use the first loaded font".
     pub font_id: String,
+    /// Drawing order: lower values are rendered first (further back).
+    /// Defaults to the insertion order index so that labels added later
+    /// appear on top.
+    pub zindex: i32,
     /// Set whenever a property changes so the GPU texture is re-uploaded.
     pub(crate) dirty: bool,
 }
@@ -77,6 +81,7 @@ pub struct TextLabelBuilder<'a> {
     pub(crate) color:     [f32; 4],
     pub(crate) font_id:   String,
     pub(crate) visible:   bool,
+    pub(crate) zindex:    Option<i32>,
 }
 
 impl<'a> TextLabelBuilder<'a> {
@@ -102,6 +107,12 @@ impl<'a> TextLabelBuilder<'a> {
         self.font_id = font_id.into(); self
     }
 
+    /// Override the draw order.  Lower values render first (further back).
+    /// When not called, defaults to insertion order.
+    pub fn with_zindex(mut self, z: i32) -> Self {
+        self.zindex = Some(z); self
+    }
+
     /// Start the label hidden; call [`TextLabelHandle::show`] to reveal it.
     pub fn hidden(mut self) -> Self {
         self.visible = false; self
@@ -114,7 +125,8 @@ impl<'a> TextLabelBuilder<'a> {
     pub fn build(self) -> TextLabelHandle {
         let id = self.overlay.next_id;
         self.overlay.next_id += 1;
-        self.overlay.labels.push(TextLabel {
+        let zindex = self.zindex.unwrap_or(id as i32);
+        self.overlay.labels.insert(id, TextLabel {
             id,
             text:      self.text,
             x:         self.x,
@@ -123,6 +135,7 @@ impl<'a> TextLabelBuilder<'a> {
             color:     self.color,
             visible:   self.visible,
             font_id:   self.font_id,
+            zindex,
             dirty:     true,
         });
         TextLabelHandle { id }
@@ -151,17 +164,17 @@ pub struct TextLabelHandle {
 impl TextLabelHandle {
     /// Borrow the underlying [`TextLabel`], or `None` if already removed.
     pub fn label<'a>(&self, overlay: &'a crate::text_overlay::TextOverlay) -> Option<&'a TextLabel> {
-        overlay.labels.iter().find(|l| l.id == self.id)
+        overlay.labels.get(&self.id)
     }
 
     /// Returns `true` if the label still exists in `overlay`.
     pub fn exists(&self, overlay: &crate::text_overlay::TextOverlay) -> bool {
-        overlay.labels.iter().any(|l| l.id == self.id)
+        overlay.labels.contains_key(&self.id)
     }
 
     /// Replace the displayed text.  Returns `false` if the label was removed.
     pub fn set_text(&self, overlay: &mut crate::text_overlay::TextOverlay, text: impl Into<String>) -> bool {
-        if let Some(l) = overlay.labels.iter_mut().find(|l| l.id == self.id) {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
             l.text  = text.into();
             l.dirty = true;
             true
@@ -170,51 +183,57 @@ impl TextLabelHandle {
 
     /// Move to a new pixel position.  Returns `false` if already removed.
     pub fn move_to(&self, overlay: &mut crate::text_overlay::TextOverlay, x: f32, y: f32) -> bool {
-        if let Some(l) = overlay.labels.iter_mut().find(|l| l.id == self.id) {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
             l.x = x; l.y = y; l.dirty = true; true
         } else { false }
     }
 
     /// Change the RGBA colour.  Returns `false` if already removed.
     pub fn set_color(&self, overlay: &mut crate::text_overlay::TextOverlay, color: [f32; 4]) -> bool {
-        if let Some(l) = overlay.labels.iter_mut().find(|l| l.id == self.id) {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
             l.color = color; l.dirty = true; true
         } else { false }
     }
 
     /// Change the font size in pixels.  Returns `false` if already removed.
     pub fn set_font_size(&self, overlay: &mut crate::text_overlay::TextOverlay, size: f32) -> bool {
-        if let Some(l) = overlay.labels.iter_mut().find(|l| l.id == self.id) {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
             l.font_size = size; l.dirty = true; true
         } else { false }
     }
 
     /// Switch to a different font by string ID.  Returns `false` if removed.
     pub fn set_font(&self, overlay: &mut crate::text_overlay::TextOverlay, font_id: impl Into<String>) -> bool {
-        if let Some(l) = overlay.labels.iter_mut().find(|l| l.id == self.id) {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
             l.font_id = font_id.into(); l.dirty = true; true
+        } else { false }
+    }
+
+    /// Override the draw order.  Lower values render first (further back).
+    /// Returns `false` if already removed.
+    pub fn set_zindex(&self, overlay: &mut crate::text_overlay::TextOverlay, z: i32) -> bool {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
+            l.zindex = z; true
         } else { false }
     }
 
     /// Make the label visible.  Returns `false` if already removed.
     pub fn show(&self, overlay: &mut crate::text_overlay::TextOverlay) -> bool {
-        if let Some(l) = overlay.labels.iter_mut().find(|l| l.id == self.id) {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
             l.visible = true; true
         } else { false }
     }
 
     /// Hide the label without removing it.  Returns `false` if already removed.
     pub fn hide(&self, overlay: &mut crate::text_overlay::TextOverlay) -> bool {
-        if let Some(l) = overlay.labels.iter_mut().find(|l| l.id == self.id) {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
             l.visible = false; true
         } else { false }
     }
 
     /// Remove the label from `overlay`.  Returns `false` if already removed.
     pub fn remove(&self, overlay: &mut crate::text_overlay::TextOverlay) -> bool {
-        if let Some(pos) = overlay.labels.iter().position(|l| l.id == self.id) {
-            overlay.labels.remove(pos); true
-        } else { false }
+        overlay.labels.remove(&self.id).is_some()
     }
 }
 
@@ -243,7 +262,8 @@ pub(crate) fn rasterize_text(
     }
 
     let text_height = ((max_above_baseline - min_below_baseline) as u32).max(1) + 2;
-    let text_width  = (total_advance as u32).max(1) + 2;
+    // Use ceil so fractional sub-pixel advances don't clip the last glyph.
+    let text_width  = (total_advance.ceil() as u32).max(1) + 2;
 
     let mut pixels   = vec![0u8; (text_width * text_height * 4) as usize];
     let r            = (color[0] * 255.0) as u8;
@@ -251,7 +271,8 @@ pub(crate) fn rasterize_text(
     let b            = (color[2] * 255.0) as u8;
     let base_alpha   = color[3];
     let baseline_y   = max_above_baseline as i32 + 1;
-    let mut cursor_x = 1i32;
+    // Use a float cursor to accumulate sub-pixel advances accurately.
+    let mut cursor_x = 1.0f32;
 
     for (metrics, bitmap) in &glyphs {
         for gy in 0..metrics.height {
@@ -260,9 +281,7 @@ pub(crate) fn rasterize_text(
                 if alpha_byte == 0 { continue; }
 
                 // fontdue bitmap row 0 = top of glyph bounding box.
-                // py = baseline_y − (ymin + height − 1 − gy)
-                //    = baseline_y − ymin − height + 1 + gy
-                let px = cursor_x + gx as i32 + metrics.xmin;
+                let px = cursor_x as i32 + gx as i32 + metrics.xmin;
                 let py = baseline_y - metrics.ymin - metrics.height as i32 + 1 + gy as i32;
 
                 if px >= 0 && px < text_width as i32 && py >= 0 && py < text_height as i32 {
@@ -274,7 +293,7 @@ pub(crate) fn rasterize_text(
                 }
             }
         }
-        cursor_x += metrics.advance_width as i32;
+        cursor_x += metrics.advance_width;
     }
 
     (pixels, text_width, text_height)

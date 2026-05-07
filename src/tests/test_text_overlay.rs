@@ -22,13 +22,10 @@ fn add_font_rejects_empty_id() {
 #[test]
 fn add_font_rejects_duplicate_id() {
     let mut overlay = TextOverlay::new();
-    // First registration of "dup" will fail to parse (not a real font), that's ok —
-    // we just need to verify the duplicate-check fires even for a valid first entry.
-    // Use the fact that an empty-bytes call reaches the empty-check first:
-    // easier to test with two calls that both fail for different reasons.
-    let _ = overlay.add_font("dup", b"fake");   // fails: bad font bytes
-    // Try again with same id, should fail with "already registered" if first succeeded,
-    // but since it failed the id isn't stored; so just verify the error message path.
+    let font_bytes = include_bytes!("./samples/fonts/Cause-Regular.ttf");
+
+    overlay.add_font("dup", font_bytes).unwrap();
+
     let err = overlay.add_font("", b"x").unwrap_err();
     assert!(err.contains("must not be empty"));
 }
@@ -266,9 +263,52 @@ fn ortho_matrix_maps_bottom_right_correctly() {
 fn rasterize_returns_none_when_no_font_loaded() {
     let overlay = TextOverlay::new();
     let dummy = TextLabel {
-        id: 0, text: "test".into(), x: 0.0, y: 0.0,
-        font_size: 16.0, color: [1.0; 4], visible: true,
-        font_id: String::new(), dirty: true,
+        id: 0,
+        text: "test".into(),
+        x: 0.0,
+        y: 0.0,
+        font_size: 16.0,
+        color: [1.0; 4],
+        visible: true,
+        font_id: String::new(),
+        zindex: 0,
+        dirty: true,
     };
     assert!(overlay.rasterize_label(&dummy).is_none());
 }
+
+#[test]
+fn zindex_defaults_to_insertion_order() {
+    let mut overlay = TextOverlay::new();
+    let a = overlay.add_label("a").build();
+    let b = overlay.add_label("b").build();
+    let c = overlay.add_label("c").build();
+    let za = a.label(&overlay).unwrap().zindex;
+    let zb = b.label(&overlay).unwrap().zindex;
+    let zc = c.label(&overlay).unwrap().zindex;
+    assert!(za < zb, "first label should have lower zindex than second");
+    assert!(zb < zc, "second label should have lower zindex than third");
+}
+
+#[test]
+fn with_zindex_overrides_insertion_order() {
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("z").with_zindex(42).build();
+    assert_eq!(h.label(&overlay).unwrap().zindex, 42);
+}
+
+#[test]
+fn set_zindex_updates_value() {
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("z").build();
+    assert!(h.set_zindex(&mut overlay, -5));
+    assert_eq!(h.label(&overlay).unwrap().zindex, -5);
+}
+
+#[test]
+fn set_zindex_returns_false_for_missing_label() {
+    let mut overlay = TextOverlay::new();
+    let ghost = TextLabelHandle { id: 999 };
+    assert!(!ghost.set_zindex(&mut overlay, 10));
+}
+

@@ -59,6 +59,10 @@ pub struct Scene {
     /// Screen-space text overlay.  Labels added here are rendered on top of
     /// the 3D scene every frame regardless of camera position.
     pub text_overlay: TextOverlay,
+    /// Per-label GPU resource cache.  Entries are created on first use and
+    /// re-created only when the label's `dirty` flag is set.  Stale entries
+    /// (whose label has been removed from the overlay) are pruned each frame.
+    pub(crate) text_quad_cache: HashMap<usize, crate::pipeline::TextQuad>,
 }
 
 impl Scene {
@@ -162,20 +166,54 @@ impl Scene {
             .and_then(|ed| ed.gizmo_overlay_for_selection(&self.world, &self.camera))
             .map(|(v, i)| self.pipeline.create_baked_mesh(&v, &i));
 
-        // Build screen-space text quads for Layer 4.
-        let text_quads: Vec<crate::pipeline::TextQuad> = self.text_overlay.labels()
+        // Rebuild per-label GPU resources only when the label is dirty.
+        // Collect label snapshots first to avoid borrowing self.text_overlay while
+        // we also need self.pipeline and self.text_quad_cache.
+        // Tuple: (id, visible, dirty, x, y, zindex)
+        let mut label_snapshots: Vec<(usize, bool, bool, f32, f32, i32)> = self
+            .text_overlay
+            .labels()
+            .map(|l| (l.id, l.visible, l.dirty, l.x, l.y, l.zindex))
+            .collect();
+
+        // Sort by zindex so lower values are drawn first (further back).
+        label_snapshots.sort_by_key(|(.., z)| *z);
+
+        for (id, _visible, dirty, x, y, _z) in &label_snapshots {
+            let needs_rebuild = *dirty || !self.text_quad_cache.contains_key(id);
+            if needs_rebuild {
+                // O(1) lookup via HashMap key.
+                if let Some(label) = self.text_overlay.labels.get(id) {
+                    if let Some((pixels, w, h)) = self.text_overlay.rasterize_label(label) {
+                        if w > 0 && h > 0 && !pixels.is_empty() {
+                            let quad = self.pipeline.create_text_quad(*x, *y, w, h, &pixels);
+                            self.text_quad_cache.insert(*id, quad);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clear dirty flags now that GPU resources are up-to-date.
+        for label in self.text_overlay.labels.values_mut() {
+            label.dirty = false;
+        }
+
+        // Prune cache entries for labels that have been removed.
+        let live_ids: std::collections::HashSet<usize> =
+            label_snapshots.iter().map(|(id, ..)| *id).collect();
+        self.text_quad_cache.retain(|id, _| live_ids.contains(id));
+
+        // Collect references to cached quads for visible labels, in zindex order.
+        let text_quad_refs: Vec<&crate::pipeline::TextQuad> = label_snapshots
             .iter()
-            .filter(|l| l.visible)
-            .filter_map(|label| {
-                let (pixels, w, h) = self.text_overlay.rasterize_label(label)?;
-                if w == 0 || h == 0 || pixels.is_empty() { return None; }
-                Some(self.pipeline.create_text_quad(label.x, label.y, w, h, &pixels))
-            })
+            .filter(|(_, visible, ..)| *visible)
+            .filter_map(|(id, ..)| self.text_quad_cache.get(id))
             .collect();
 
         let camera = &self.camera;
         let skybox = self.editor.as_ref().and_then(|ed| ed.skybox.as_ref());
-        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref(), &text_quads)
+        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref(), &text_quad_refs)
     }
 
     /// Switch into static editor mode.

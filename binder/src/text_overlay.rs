@@ -64,6 +64,8 @@ impl TextOverlay {
     /// * `font_size` - Font size in pixels.
     /// * `color`     - `[r, g, b, a]` in `[0.0, 1.0]`.
     /// * `font_id`   - Optional font ID string. Pass `undefined`/`null` to use the default font (index 0).
+    /// * `zindex`    - Optional draw order. Lower values render first (further back).
+    ///                 Pass `undefined`/`null` to default to insertion order.
     ///
     /// Returns a [`TextLabel`] handle.
     pub fn add_label(
@@ -73,6 +75,7 @@ impl TextOverlay {
         font_size: f32,
         color: Vec<f32>,
         font_id: Option<String>,
+        zindex: Option<i32>,
     ) -> TextLabel {
         let (x, y) = if position.len() >= 2 { (position[0], position[1]) } else { (0.0, 0.0) };
         let c = pad4(&color);
@@ -84,6 +87,9 @@ impl TextOverlay {
                 .with_color(c);
             if let Some(fid) = font_id {
                 builder = builder.with_font(fid);
+            }
+            if let Some(z) = zindex {
+                builder = builder.with_zindex(z);
             }
             builder.build().id
         };
@@ -173,6 +179,12 @@ impl TextLabel {
             let handle = TextLabelHandle { id: self.id };
             if visible { handle.show(&mut *self.overlay); } else { handle.hide(&mut *self.overlay); }
         }
+    }
+
+    /// Set the draw order.  Lower values render first (further back).
+    #[wasm_bindgen(setter)]
+    pub fn set_zindex(&mut self, z: i32) {
+        unsafe { TextLabelHandle { id: self.id }.set_zindex(&mut *self.overlay, z); }
     }
 
     /// Remove the label from the overlay.  Returns `true` if it existed.

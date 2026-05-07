@@ -21,6 +21,7 @@
 //! score.set_text(&mut scene.text_overlay, "Score: 100");
 //! ```
 
+use std::collections::HashMap;
 use crate::mesh::Vertex;
 pub use crate::text_label::{TextLabel, TextLabelBuilder, TextLabelHandle};
 #[cfg(feature = "default-fonts")]
@@ -32,7 +33,8 @@ use crate::text_label::rasterize_text;
 /// Owned by [`crate::scene::Scene`] and rendered as a final overlay pass in
 /// [`crate::scene::Scene::draw_world`].
 pub struct TextOverlay {
-    pub(crate) labels: Vec<TextLabel>,
+    /// Labels keyed by their unique ID for O(1) lookup.
+    pub(crate) labels: HashMap<usize, TextLabel>,
     pub(crate) next_id: usize,
     /// Fonts stored as `(font_id, font)` in insertion order.
     pub(crate) fonts: Vec<(String, fontdue::Font)>,
@@ -49,7 +51,7 @@ impl TextOverlay {
     /// automatically if their placeholder files contain valid TTF data.
     pub fn new() -> Self {
         #[allow(unused_mut)]
-        let mut this = Self { labels: Vec::new(), next_id: 0, fonts: Vec::new() };
+        let mut this = Self { labels: HashMap::new(), next_id: 0, fonts: Vec::new() };
         #[cfg(feature = "default-fonts")]
         this.load_default_fonts();
         this
@@ -97,8 +99,7 @@ impl TextOverlay {
     ///
     /// Registers fonts under the IDs `"sans"`, `"serif"`, and `"mono"` (see
     /// [`DefaultFont`]).  Called automatically by [`TextOverlay::new`] when
-    /// the `default-fonts` feature is enabled.  Empty placeholder files are
-    /// silently skipped; already-registered IDs are also skipped.
+    /// the `default-fonts` feature is enabled.
     #[cfg(feature = "default-fonts")]
     pub fn load_default_fonts(&mut self) {
         const SANS_BYTES:  &[u8] = include_bytes!("fonts/sans.ttf");
@@ -144,11 +145,14 @@ impl TextOverlay {
             color:     [1.0, 1.0, 1.0, 1.0],
             font_id:   String::new(), // empty = first loaded font
             visible:   true,
+            zindex:    None,          // defaults to insertion order in build()
         }
     }
 
-    /// Returns a slice of all live labels.
-    pub fn labels(&self) -> &[TextLabel] { &self.labels }
+    /// Returns an iterator over all live labels.
+    pub fn labels(&self) -> impl Iterator<Item = &TextLabel> {
+        self.labels.values()
+    }
 
     /// Returns the number of live labels.
     pub fn label_count(&self) -> usize { self.labels.len() }
