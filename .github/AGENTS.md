@@ -98,6 +98,9 @@ Unit/integration tests live in `src/tests/` (gated `#[cfg(test)]`):
 - `test_scripts.rs` – `ObjectScript` lifecycle
 - `test_snapshot.rs`, `test_frame_stats.rs`, `test_text_overlay.rs`, `test_timer.rs`
 
+Test regarding specific features should be gated using `#[cfg(feature = "feature-name")]`
+and the test name should start with `feature_<feature_name>_` for discoverability.
+
 Binder-side tests are in `binder/tests/mutation.rs` (run under `wasm-bindgen-test`).
 
 ## Key Files to Read First

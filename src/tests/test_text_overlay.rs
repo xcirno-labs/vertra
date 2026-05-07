@@ -1,10 +1,21 @@
-use crate::text_overlay::{TextLabel, TextLabelHandle, TextOverlay};
+use crate::text_overlay::{TextLabelHandle, TextOverlay};
+#[cfg(not(feature = "default-fonts"))]
+use crate::text_overlay::TextLabel;
 
+#[cfg(not(feature = "default-fonts"))]
 #[test]
 fn new_overlay_is_empty() {
     let overlay = TextOverlay::new();
     assert_eq!(overlay.label_count(), 0);
     assert_eq!(overlay.font_count(), 0);
+}
+
+#[cfg(feature = "default-fonts")]
+#[test]
+fn feature_default_fonts_new_overlay_is_not_empty() {
+    let overlay = TextOverlay::new();
+    assert_eq!(overlay.label_count(), 0);
+    assert_ne!(overlay.font_count(), 0);
 }
 
 #[test]
@@ -26,8 +37,8 @@ fn add_font_rejects_duplicate_id() {
 
     overlay.add_font("dup", font_bytes).unwrap();
 
-    let err = overlay.add_font("", b"x").unwrap_err();
-    assert!(err.contains("must not be empty"));
+    let err = overlay.add_font("dup", b"x").unwrap_err();
+    assert!(err.contains("is already registered"));
 }
 
 #[test]
@@ -39,6 +50,7 @@ fn has_font_returns_correct_values() {
     // Still false because parse failed
     assert!(!overlay.has_font("roboto"));
 }
+#[cfg(not(feature = "default-fonts"))]
 #[test]
 fn font_count_stays_zero_with_no_valid_fonts() {
     let overlay = TextOverlay::new();
@@ -259,6 +271,7 @@ fn ortho_matrix_maps_bottom_right_correctly() {
     assert!((y_ndc - -1.0).abs() < 1e-4, "y={y_ndc}");
 }
 
+#[cfg(not(feature = "default-fonts"))]
 #[test]
 fn rasterize_returns_none_when_no_font_loaded() {
     let overlay = TextOverlay::new();

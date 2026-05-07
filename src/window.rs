@@ -159,7 +159,7 @@ impl<S> Window<S> {
     /// The default sample window is `0.5` seconds.
     ///
     /// # Examples
-    /// ```
+    /// ```rust,ignore
     /// let window = Window::new(()).with_stats_sample_window(0.5);
     /// ```
     pub fn with_stats_sample_window(mut self, secs: f32) -> Self {

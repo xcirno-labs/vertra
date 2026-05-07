@@ -545,8 +545,10 @@ impl Pipeline {
     /// Create a [`TextQuad`] from raw RGBA8 pixels and a screen-space position.
     ///
     /// `x`, `y`, `tex_width`, `tex_height` are all in pixel coordinates.
-    /// The returned [`TextQuad`] is valid for one frame; re-create it whenever
-    /// the label changes.
+    /// The returned [`TextQuad`] owns its GPU resources and may be reused across
+    /// frames for as long as you keep it. Re-create it when the underlying text
+    /// image changes (for example, when the label changes), or drop it when it is
+    /// no longer needed.
     pub fn create_text_quad(
         &self,
         x: f32,
