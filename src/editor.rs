@@ -56,6 +56,10 @@ pub use types::{
     // Inspector data
     InspectorData,
     Inspector,
+    // Label editor types
+    LabelInspectorData,
+    LabelDragKind,
+    LabelDragState,
 };
 pub use state::EditorState;
 pub use gizmo::{

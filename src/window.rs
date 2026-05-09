@@ -355,6 +355,12 @@ impl<S> Window<S> {
                     .and_then(|ed| ed.drag.as_ref().map(|d| d.object_id));
                 let prev_selection_id = scene.editor.as_ref()
                     .and_then(|ed| ed.inspector.selected.as_ref().map(|s| s.id));
+                let prev_label_sel_id = scene.editor.as_ref()
+                    .and_then(|ed| ed.selected_label.as_ref().map(|l| l.id));
+                let prev_label_pos    = scene.editor.as_ref()
+                    .and_then(|ed| ed.selected_label.as_ref().map(|l| (l.x, l.y)));
+                let prev_label_size   = scene.editor.as_ref()
+                    .and_then(|ed| ed.selected_label.as_ref().map(|l| l.font_size));
 
                 dispatch_editor_event(&mut *scene, &event);
 
@@ -364,7 +370,7 @@ impl<S> Window<S> {
                         if let Some(prev) = prev_gizmo_mode {
                             if prev != ed.gizmo_mode {
                                 let mode = ed.gizmo_mode;
-                                let obj  = ed.inspector.selected.as_ref()
+                                let obj = ed.inspector.selected.as_ref()
                                     .and_then(|s| scene.world.objects.get(&s.id).cloned());
                                 to_fire.push((EditorStateEvent::GizmoModeChanged(mode), obj));
                             }
@@ -373,7 +379,7 @@ impl<S> Window<S> {
                         if !prev_drag_active {
                             if let Some(drag) = &ed.drag {
                                 let axis = drag.axis;
-                                let obj  = scene.world.objects.get(&drag.object_id).cloned();
+                                let obj = scene.world.objects.get(&drag.object_id).cloned();
                                 to_fire.push((EditorStateEvent::DragStart { axis }, obj));
                             }
                         }
@@ -389,6 +395,22 @@ impl<S> Window<S> {
                             let obj = new_selection_id
                                 .and_then(|id| scene.world.objects.get(&id).cloned());
                             to_fire.push((EditorStateEvent::SelectionChanged, obj));
+                        }
+                        // ── Label selection / move / resize events ──────────
+                        let new_label_sel_id = ed.selected_label.as_ref().map(|l| l.id);
+                        if prev_label_sel_id != new_label_sel_id {
+                            let snap = ed.selected_label.clone();
+                            to_fire.push((EditorStateEvent::LabelSelectionChanged(snap), None));
+                        }
+                        if let Some(snap) = &ed.selected_label {
+                            let new_pos = (snap.x, snap.y);
+                            let new_size = snap.font_size;
+                            if prev_label_pos.map_or(false, |p| p != new_pos) {
+                                to_fire.push((EditorStateEvent::LabelMoved(snap.clone()), None));
+                            }
+                            if prev_label_size.map_or(false, |s| (s - new_size).abs() > 0.001) {
+                                to_fire.push((EditorStateEvent::LabelResized(snap.clone()), None));
+                            }
                         }
                     }
                     for (ev, obj) in to_fire {

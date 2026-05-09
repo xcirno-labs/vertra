@@ -34,10 +34,10 @@ use crate::text_label::rasterize_text;
 /// [`crate::scene::Scene::draw_world`].
 pub struct TextOverlay {
     /// Labels keyed by their unique ID for O(1) lookup.
-    pub(crate) labels: HashMap<usize, TextLabel>,
+    pub labels: HashMap<usize, TextLabel>,
     pub(crate) next_id: usize,
     /// Fonts stored as `(font_id, font)` in insertion order.
-    pub(crate) fonts: Vec<(String, fontdue::Font)>,
+    pub fonts: Vec<(String, fontdue::Font)>,
 }
 
 impl Default for TextOverlay {

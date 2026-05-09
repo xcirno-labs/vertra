@@ -1,8 +1,9 @@
+use vertra::editor::LabelInspectorData as CoreLabelInspectorData;
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 use vertra::editor::InspectorData as CoreInspectorData;
-use vertra::editor::EditorEvent;
 use vertra::scene::Scene as CoreScene;
+use vertra::editor::EditorEvent;
 use std::cell::RefCell;
 
 thread_local! {
@@ -25,6 +26,52 @@ pub(crate) fn fire_selection_changed(scene: *mut CoreScene) {
     });
 }
 
+pub(crate) fn fire_label_selection_changed(scene: *mut CoreScene) {
+    EDITOR_EVENT_CB.with(|cb| {
+        if let Some(f) = cb.borrow().as_ref() {
+            let data = unsafe {
+                (*scene).editor.as_ref()
+                    .and_then(|ed| ed.selected_label.as_ref())
+                    .map(JsLabelInspectorData::from)
+            };
+            let ev = WebEditorEvent::LabelSelectionChanged { data };
+            if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
+                let _ = f.call1(&JsValue::UNDEFINED, &js);
+            }
+        }
+    });
+}
+pub(crate) fn fire_label_selection_changed_data(data: Option<JsLabelInspectorData>) {
+    EDITOR_EVENT_CB.with(|cb| {
+        if let Some(f) = cb.borrow().as_ref() {
+            let ev = WebEditorEvent::LabelSelectionChanged { data };
+            if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
+                let _ = f.call1(&JsValue::UNDEFINED, &js);
+            }
+        }
+    });
+}
+pub(crate) fn fire_label_moved(data: JsLabelInspectorData) {
+    EDITOR_EVENT_CB.with(|cb| {
+        if let Some(f) = cb.borrow().as_ref() {
+            let ev = WebEditorEvent::LabelMoved { data };
+            if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
+                let _ = f.call1(&JsValue::UNDEFINED, &js);
+            }
+        }
+    });
+}
+pub(crate) fn fire_label_resized(data: JsLabelInspectorData) {
+    EDITOR_EVENT_CB.with(|cb| {
+        if let Some(f) = cb.borrow().as_ref() {
+            let ev = WebEditorEvent::LabelResized { data };
+            if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
+                let _ = f.call1(&JsValue::UNDEFINED, &js);
+            }
+        }
+    });
+}
+
 #[wasm_bindgen(typescript_custom_section)]
 const TS_INSPECTOR: &'static str = r#"
 export interface InspectorData {
@@ -37,6 +84,16 @@ export interface InspectorData {
     color: [number, number, number, number];
     geometry_type: string | null;
 }
+export interface LabelInspectorData {
+    id: number;
+    text: string;
+    x: number;
+    y: number;
+    font_size: number;
+    color: [number, number, number, number];
+    font_id: string;
+    zindex: number;
+}
 export type EditorEventPayload =
     | { type: "mouse_motion";   dx: number; dy: number }
     | { type: "cursor_moved";   x: number;  y: number  }
@@ -46,11 +103,14 @@ export type EditorEventPayload =
     | { type: "focus_key" }
     | { type: "key_pressed";    code: string }
     | { type: "key_released";   code: string };
-export type EditorEventType =
-    | { type: "gizmo_mode_changed"; mode: string }
-    | { type: "drag_start";         axis: string }
+export type EditorEvent =
+    | { type: "gizmo_mode_changed";      mode: string }
+    | { type: "drag_start";              axis: string }
     | { type: "drag_end" }
-    | { type: "selection_changed";  data: InspectorData | null };
+    | { type: "selection_changed";       data: InspectorData | null }
+    | { type: "label_selection_changed"; data: LabelInspectorData | null }
+    | { type: "label_moved";             data: LabelInspectorData }
+    | { type: "label_resized";           data: LabelInspectorData };
 export type EngineMode = "editor" | "play";
 "#;
 #[derive(Serialize)]
@@ -67,14 +127,39 @@ pub struct JsInspectorData {
 impl From<&CoreInspectorData> for JsInspectorData {
     fn from(d: &CoreInspectorData) -> Self {
         Self {
-            id:            d.id,
-            name:          d.name.clone(),
-            str_id:        d.str_id.clone(),
-            position:      d.position,
-            rotation_deg:  d.rotation_deg,
-            scale:         d.scale,
-            color:         d.color,
+            id: d.id,
+            name: d.name.clone(),
+            str_id: d.str_id.clone(),
+            position: d.position,
+            rotation_deg: d.rotation_deg,
+            scale: d.scale,
+            color: d.color,
             geometry_type: d.geometry_type.clone(),
+        }
+    }
+}
+#[derive(Serialize, Clone)]
+pub struct JsLabelInspectorData {
+    pub id:        usize,
+    pub text:      String,
+    pub x:         f32,
+    pub y:         f32,
+    pub font_size: f32,
+    pub color:     [f32; 4],
+    pub font_id:   String,
+    pub zindex:    i32,
+}
+impl From<&CoreLabelInspectorData> for JsLabelInspectorData {
+    fn from(d: &CoreLabelInspectorData) -> Self {
+        Self {
+            id:        d.id,
+            text:      d.text.clone(),
+            x:         d.x,
+            y:         d.y,
+            font_size: d.font_size,
+            color:     d.color,
+            font_id:   d.font_id.clone(),
+            zindex:    d.zindex,
         }
     }
 }
@@ -87,6 +172,12 @@ pub enum WebEditorEvent {
     DragStart { axis: String },
     #[serde(rename = "drag_end")]
     DragEnd,
+    #[serde(rename = "label_selection_changed")]
+    LabelSelectionChanged { data: Option<JsLabelInspectorData> },
+    #[serde(rename = "label_moved")]
+    LabelMoved { data: JsLabelInspectorData },
+    #[serde(rename = "label_resized")]
+    LabelResized { data: JsLabelInspectorData },
     #[serde(rename = "selection_changed")]
     SelectionChanged { data: Option<JsInspectorData> },
 }
@@ -232,6 +323,79 @@ impl Editor {
             }
         }
     }
+    // ── Label editor ──────────────────────────────────────────────────────
+
+    /// Returns the currently-selected label's inspector data, or `undefined`.
+    pub fn selected_label(&self) -> JsValue {
+        unsafe {
+            match (*self.scene).editor.as_ref()
+                .and_then(|ed| ed.selected_label.as_ref())
+            {
+                Some(data) => {
+                    let js = JsLabelInspectorData::from(data);
+                    serde_wasm_bindgen::to_value(&js).unwrap_or(JsValue::UNDEFINED)
+                }
+                None => JsValue::UNDEFINED,
+            }
+        }
+    }
+
+    /// Clear the label selection without removing the label.
+    pub fn clear_label_selection(&mut self) {
+        unsafe {
+            if let Some(ed) = &mut (*self.scene).editor {
+                ed.selected_label = None;
+                ed.label_drag     = None;
+            }
+        }
+        fire_label_selection_changed(self.scene);
+    }
+
+    /// Move the selected label to `(x, y)` pixels from the top-left corner.
+    /// Returns `false` if no label is selected or the label was removed.
+    pub fn move_selected_label(&mut self, x: f32, y: f32) -> bool {
+        unsafe {
+            let scene = &mut *self.scene;
+            let id = match scene.editor.as_ref().and_then(|ed| ed.selected_label.as_ref().map(|l| l.id)) {
+                Some(id) => id,
+                None     => return false,
+            };
+            if let Some(label) = scene.text_overlay.labels.get_mut(&id) {
+                label.x     = x;
+                label.y     = y;
+                label.dirty = true;
+            } else { return false; }
+            if let Some(ed) = &mut scene.editor {
+                if let Some(sel) = &mut ed.selected_label {
+                    if sel.id == id { sel.x = x; sel.y = y; }
+                }
+            }
+            true
+        }
+    }
+
+    /// Resize the selected label to `font_size` pixels.
+    /// Returns `false` if no label is selected or the label was removed.
+    pub fn resize_selected_label(&mut self, font_size: f32) -> bool {
+        unsafe {
+            let scene = &mut *self.scene;
+            let id = match scene.editor.as_ref().and_then(|ed| ed.selected_label.as_ref().map(|l| l.id)) {
+                Some(id) => id,
+                None     => return false,
+            };
+            let size = font_size.max(4.0);
+            if let Some(label) = scene.text_overlay.labels.get_mut(&id) {
+                label.font_size = size;
+                label.dirty     = true;
+            } else { return false; }
+            if let Some(ed) = &mut scene.editor {
+                if let Some(sel) = &mut ed.selected_label {
+                    if sel.id == id { sel.font_size = size; }
+                }
+            }
+            true
+        }
+    }
     pub fn editor_event(&mut self, payload: JsValue) -> Result<(), JsValue> {
         let ev: JsEditorEvent = serde_wasm_bindgen::from_value(payload)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -245,15 +409,15 @@ impl Editor {
                 y: ev.y.unwrap_or(0.0),
             },
             "mouse_button" => EditorEvent::MouseButton {
-                left:   ev.left,
+                left: ev.left,
                 middle: ev.middle,
-                right:  ev.right,
+                right: ev.right,
             },
             "scroll" => EditorEvent::Scroll {
                 delta: ev.delta.unwrap_or(0.0),
             },
             "modifiers" => EditorEvent::ModifiersChanged {
-                alt:  ev.alt.unwrap_or(false),
+                alt: ev.alt.unwrap_or(false),
                 ctrl: ev.ctrl.unwrap_or(false),
             },
             "focus_key" => EditorEvent::FocusKey,
@@ -271,7 +435,50 @@ impl Editor {
             }
             other => return Err(JsValue::from_str(&format!("Unknown editor event type: {other}"))),
         };
-        unsafe { (*self.scene).handle_editor_event(editor_ev); }
+        let overlay_ev = unsafe { (*self.scene).handle_editor_event(editor_ev) };
+
+        // Fire JS callbacks for label editor state changes.
+        use vertra::editor::EditorStateEvent;
+        match overlay_ev {
+            Some(EditorStateEvent::LabelSelectionChanged(ref data)) => {
+                let js_data = data.as_ref().map(JsLabelInspectorData::from);
+                fire_label_selection_changed_data(js_data);
+            }
+            Some(EditorStateEvent::LabelMoved(ref data)) => {
+                fire_label_moved(JsLabelInspectorData::from(data));
+            }
+            Some(EditorStateEvent::LabelResized(ref data)) => {
+                fire_label_resized(JsLabelInspectorData::from(data));
+            }
+            _ => {}
+        }
         Ok(())
+    }
+
+    /// Returns the pixel bounding box `[x, y, w, h]` of the currently-selected
+    /// label (estimated from text length × font size), or `undefined` if nothing
+    /// is selected.
+    pub fn selected_label_bounds(&self) -> JsValue {
+        unsafe {
+            let scene = &*self.scene;
+            let ed = match scene.editor.as_ref() { Some(e) => e, None => return JsValue::UNDEFINED };
+            match ed.selected_label_bounds(&scene.text_overlay) {
+                Some((x, y, w, h)) => serde_wasm_bindgen::to_value(&[x, y, w, h]).unwrap_or(JsValue::UNDEFINED),
+                None => JsValue::UNDEFINED,
+            }
+        }
+    }
+
+    /// Returns the pixel rect `[x, y, w, h]` of the resize handle (bottom-right
+    /// corner of the selection box) for the currently-selected label, or `undefined`.
+    pub fn selected_label_resize_handle(&self) -> JsValue {
+        unsafe {
+            let scene = &*self.scene;
+            let ed = match scene.editor.as_ref() { Some(e) => e, None => return JsValue::UNDEFINED };
+            match ed.selected_label_resize_handle(&scene.text_overlay) {
+                Some((x, y, w, h)) => serde_wasm_bindgen::to_value(&[x, y, w, h]).unwrap_or(JsValue::UNDEFINED),
+                None => JsValue::UNDEFINED,
+            }
+        }
     }
 }

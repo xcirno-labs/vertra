@@ -344,6 +344,7 @@ impl Pipeline {
         world_batches: &[(&BakedMesh, &wgpu::BindGroup)],
         skybox: Option<&BakedMesh>,
         overlay: Option<&BakedMesh>,
+        label_selection: Option<&BakedMesh>,
         text_quads: &[&TextQuad],
     ) -> RenderStats {
         let frame = match self.surface.get_current_texture() {
@@ -459,6 +460,17 @@ impl Pipeline {
                     stats.triangle_count += quad.mesh.index_count / 3;
                 }
             }
+            // Label selection box / resize handle (screen-space, on top of text).
+            if let Some(sel) = label_selection {
+                if sel.index_count > 0 {
+                    rp.set_bind_group(1, &self.default_texture_bind_group, &[]);
+                    rp.set_vertex_buffer(0, sel.vertex_buffer.slice(..));
+                    rp.set_index_buffer(sel.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    rp.draw_indexed(0..sel.index_count, 0, 0..1);
+                    stats.draw_calls += 1;
+                    stats.triangle_count += sel.index_count / 3;
+                }
+            }
         }
 
         self.queue.submit(std::iter::once(enc.finish()));
@@ -467,7 +479,7 @@ impl Pipeline {
     }
 
     pub fn render_baked_mesh(&self, mesh: &BakedMesh, camera: &Camera) {
-        self.render_scene(camera, &[(mesh, &self.default_texture_bind_group)], None, None, &[] as &[&TextQuad]);
+        self.render_scene(camera, &[(mesh, &self.default_texture_bind_group)], None, None, None, &[] as &[&TextQuad]);
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {

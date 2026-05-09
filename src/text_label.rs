@@ -64,7 +64,7 @@ pub struct TextLabel {
     /// appear on top.
     pub zindex: i32,
     /// Set whenever a property changes so the GPU texture is re-uploaded.
-    pub(crate) dirty: bool,
+    pub dirty: bool,
 }
 
 /// Fluent builder for creating a new [`TextLabel`].

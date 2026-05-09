@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::camera::Camera;
-use crate::editor::{EditorEvent, EditorState, InspectorData};
+use crate::editor::{EditorEvent, EditorState, EditorStateEvent, InspectorData};
 use crate::mesh::{MeshData, MeshRegistry};
 use crate::pipeline::{Pipeline, RenderStats};
 use crate::text_overlay::TextOverlay;
@@ -213,7 +213,13 @@ impl Scene {
 
         let camera = &self.camera;
         let skybox = self.editor.as_ref().and_then(|ed| ed.skybox.as_ref());
-        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref(), &text_quad_refs)
+
+        // Build the label selection overlay (border + resize handle) when in editor mode.
+        let label_sel_baked = self.editor.as_ref()
+            .and_then(|ed| ed.label_selection_overlay(&self.text_overlay))
+            .map(|(v, i)| self.pipeline.create_baked_mesh(&v, &i));
+
+        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref(), label_sel_baked.as_ref(), &text_quad_refs)
     }
 
     /// Switch into static editor mode.
@@ -291,12 +297,16 @@ impl Scene {
     /// **Default keybind — `Escape`:** pressing Escape while editor mode is
     /// active automatically calls [`Self::disable_editor_mode`], switching the
     /// engine to play mode before any further processing occurs.
-    pub fn handle_editor_event(&mut self, event: EditorEvent) {
-        if self.editor.is_none() { return; }
-
-
+    /// Returns an [`EditorStateEvent`] when the label editor produced a state
+    /// change (selection, move, or resize), or `None` otherwise.
+    pub fn handle_editor_event(&mut self, event: EditorEvent) -> Option<EditorStateEvent> {
+        if self.editor.is_none() { return None; }
         if let Some(ed) = &mut self.editor {
+            let overlay_ev = ed.process_overlay(&mut self.text_overlay, &event);
             ed.process(&mut self.camera, &mut self.world, event);
+            overlay_ev
+        } else {
+            None
         }
     }
 
