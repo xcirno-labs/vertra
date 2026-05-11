@@ -51,20 +51,20 @@ pub(crate) fn fire_label_selection_changed_data(data: Option<JsLabelInspectorDat
         }
     });
 }
-pub(crate) fn fire_label_moved(data: JsLabelInspectorData) {
+pub(crate) fn fire_label_drag_start(kind: &str) {
     EDITOR_EVENT_CB.with(|cb| {
         if let Some(f) = cb.borrow().as_ref() {
-            let ev = WebEditorEvent::LabelMoved { data };
+            let ev = WebEditorEvent::LabelDragStart { kind: kind.to_string() };
             if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
                 let _ = f.call1(&JsValue::UNDEFINED, &js);
             }
         }
     });
 }
-pub(crate) fn fire_label_resized(data: JsLabelInspectorData) {
+pub(crate) fn fire_label_drag_end(data: JsLabelInspectorData) {
     EDITOR_EVENT_CB.with(|cb| {
         if let Some(f) = cb.borrow().as_ref() {
-            let ev = WebEditorEvent::LabelResized { data };
+            let ev = WebEditorEvent::LabelDragEnd { data };
             if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
                 let _ = f.call1(&JsValue::UNDEFINED, &js);
             }
@@ -108,9 +108,9 @@ export type EditorEvent =
     | { type: "drag_start";              axis: string }
     | { type: "drag_end" }
     | { type: "selection_changed";       data: InspectorData | null }
-    | { type: "label_selection_changed"; data: LabelInspectorData | null }
-    | { type: "label_moved";             data: LabelInspectorData }
-    | { type: "label_resized";           data: LabelInspectorData };
+        | { type: "label_selection_changed"; data: LabelInspectorData | null }
+    | { type: "label_drag_start";           kind: "move" | "resize" }
+    | { type: "label_drag_end";             data: LabelInspectorData };
 export type EngineMode = "editor" | "play";
 "#;
 #[derive(Serialize)]
@@ -174,10 +174,10 @@ pub enum WebEditorEvent {
     DragEnd,
     #[serde(rename = "label_selection_changed")]
     LabelSelectionChanged { data: Option<JsLabelInspectorData> },
-    #[serde(rename = "label_moved")]
-    LabelMoved { data: JsLabelInspectorData },
-    #[serde(rename = "label_resized")]
-    LabelResized { data: JsLabelInspectorData },
+    #[serde(rename = "label_drag_start")]
+    LabelDragStart { kind: String },
+    #[serde(rename = "label_drag_end")]
+    LabelDragEnd { data: JsLabelInspectorData },
     #[serde(rename = "selection_changed")]
     SelectionChanged { data: Option<JsInspectorData> },
 }
@@ -443,11 +443,15 @@ impl Editor {
                 let js_data = data.as_ref().map(JsLabelInspectorData::from);
                 fire_label_selection_changed_data(js_data);
             }
-            Some(EditorStateEvent::LabelMoved(ref data)) => {
-                fire_label_moved(JsLabelInspectorData::from(data));
+            Some(EditorStateEvent::LabelDragStart { kind }) => {
+                let kind_str = match kind {
+                    vertra::editor::LabelDragKind::Move   => "move",
+                    vertra::editor::LabelDragKind::Resize => "resize",
+                };
+                fire_label_drag_start(kind_str);
             }
-            Some(EditorStateEvent::LabelResized(ref data)) => {
-                fire_label_resized(JsLabelInspectorData::from(data));
+            Some(EditorStateEvent::LabelDragEnd(ref data)) => {
+                fire_label_drag_end(JsLabelInspectorData::from(data));
             }
             _ => {}
         }

@@ -202,10 +202,12 @@ pub enum EditorEvent {
 /// The callback receives both the event **and** a cloned [`Object`] that is
 /// contextually relevant (the selected or dragged object), or `None`:
 ///
-/// * [`GizmoModeChanged`](Self::GizmoModeChanged) — the currently selected object.
-/// * [`DragStart`](Self::DragStart) — the object being dragged.
-/// * [`DragEnd`](Self::DragEnd) — the object that was just being dragged.
-/// * [`SelectionChanged`](Self::SelectionChanged) — the newly selected object, or `None` if deselected.
+/// * [`GizmoModeChanged`](Self::GizmoModeChanged) - the currently selected object.
+/// * [`DragStart`](Self::DragStart) - the object being dragged.
+/// * [`DragEnd`](Self::DragEnd) - the object that was just being dragged.
+/// * [`SelectionChanged`](Self::SelectionChanged) - the newly selected object, or `None` if deselected.
+/// * [`LabelDragStart`](Self::LabelDragStart) - fired once when a label drag begins.
+/// * [`LabelDragEnd`](Self::LabelDragEnd) - fired once when a label drag ends.
 ///
 /// # Example
 ///
@@ -261,15 +263,18 @@ pub enum EditorStateEvent {
     /// label selection was cleared.
     LabelSelectionChanged(Option<LabelInspectorData>),
 
-    /// A text label was moved by dragging it in the editor viewport.
+    /// The user started dragging a label (move or resize).
     ///
-    /// Contains an up-to-date snapshot of the label after the move.
-    LabelMoved(LabelInspectorData),
+    /// Fired once when the drag begins, analogous to [`DragStart`].
+    LabelDragStart {
+        /// Which label operation is starting.
+        kind: LabelDragKind,
+    },
 
-    /// A text label was resized (font size changed) by dragging the resize handle.
+    /// The user released a label drag (mouse button up).
     ///
-    /// Contains an up-to-date snapshot of the label after the resize.
-    LabelResized(LabelInspectorData),
+    /// Contains a final snapshot of the label's state, analogous to [`DragEnd`].
+    LabelDragEnd(LabelInspectorData),
 }
 
 /// Per-frame raw input state maintained by the editor.

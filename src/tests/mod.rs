@@ -5,3 +5,4 @@ mod test_snapshot;
 mod test_scripts;
 mod test_frame_stats;
 mod test_text_overlay;
+mod test_editor_overlay;

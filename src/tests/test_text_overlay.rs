@@ -286,6 +286,8 @@ fn rasterize_returns_none_when_no_font_loaded() {
         font_id: String::new(),
         zindex: 0,
         dirty: true,
+        rasterized_h: 0,
+        rasterized_w: 0,
     };
     assert!(overlay.rasterize_label(&dummy).is_none());
 }

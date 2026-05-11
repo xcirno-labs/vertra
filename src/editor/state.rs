@@ -558,7 +558,6 @@ impl EditorState {
                                     sel.y = label.y;
                                 }
                             }
-                            return self.selected_label.clone().map(EditorStateEvent::LabelMoved);
                         }
                         LabelDragKind::Resize => {
                             let new_size = (label.font_size + dx * 0.5).max(4.0);
@@ -569,7 +568,6 @@ impl EditorState {
                                     sel.font_size = new_size;
                                 }
                             }
-                            return self.selected_label.clone().map(EditorStateEvent::LabelResized);
                         }
                     }
                 }
@@ -595,7 +593,7 @@ impl EditorState {
                                 start_pos: [label.x, label.y],
                                 start_size: label.font_size,
                             });
-                            return None; // drag started, selection unchanged
+                            return Some(EditorStateEvent::LabelDragStart { kind: LabelDragKind::Resize });
                         }
                     }
                 }
@@ -632,8 +630,11 @@ impl EditorState {
             }
 
             EditorEvent::MouseButton { left: Some(false), .. } => {
+                let end_ev = self.label_drag.as_ref()
+                    .and_then(|d| self.selected_label.clone())
+                    .map(EditorStateEvent::LabelDragEnd);
                 self.label_drag = None;
-                None
+                end_ev
             }
 
             _ => None,

@@ -357,10 +357,8 @@ impl<S> Window<S> {
                     .and_then(|ed| ed.inspector.selected.as_ref().map(|s| s.id));
                 let prev_label_sel_id = scene.editor.as_ref()
                     .and_then(|ed| ed.selected_label.as_ref().map(|l| l.id));
-                let prev_label_pos    = scene.editor.as_ref()
-                    .and_then(|ed| ed.selected_label.as_ref().map(|l| (l.x, l.y)));
-                let prev_label_size   = scene.editor.as_ref()
-                    .and_then(|ed| ed.selected_label.as_ref().map(|l| l.font_size));
+                let prev_label_drag_active = scene.editor.as_ref()
+                    .map_or(false, |ed| ed.label_drag.is_some());
 
                 dispatch_editor_event(&mut *scene, &event);
 
@@ -401,14 +399,15 @@ impl<S> Window<S> {
                             let snap = ed.selected_label.clone();
                             to_fire.push((EditorStateEvent::LabelSelectionChanged(snap), None));
                         }
-                        if let Some(snap) = &ed.selected_label {
-                            let new_pos = (snap.x, snap.y);
-                            let new_size = snap.font_size;
-                            if prev_label_pos.map_or(false, |p| p != new_pos) {
-                                to_fire.push((EditorStateEvent::LabelMoved(snap.clone()), None));
+                        if !prev_label_drag_active {
+                            if let Some(drag) = &ed.label_drag {
+                                let kind = drag.kind;
+                                to_fire.push((EditorStateEvent::LabelDragStart { kind }, None));
                             }
-                            if prev_label_size.map_or(false, |s| (s - new_size).abs() > 0.001) {
-                                to_fire.push((EditorStateEvent::LabelResized(snap.clone()), None));
+                        }
+                        if prev_label_drag_active && ed.label_drag.is_none() {
+                            if let Some(snap) = &ed.selected_label {
+                                to_fire.push((EditorStateEvent::LabelDragEnd(snap.clone()), None));
                             }
                         }
                     }
