@@ -323,7 +323,6 @@ impl Editor {
             }
         }
     }
-    // ── Label editor ──────────────────────────────────────────────────────
 
     /// Returns the currently-selected label's inspector data, or `undefined`.
     pub fn selected_label(&self) -> JsValue {

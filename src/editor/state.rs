@@ -496,11 +496,17 @@ impl EditorState {
 
     // ── Text-label editor ──────────────────────────────────────────────────
 
-    /// Returns the approximate pixel bounding box `(x, y, w, h)` of a label,
-    /// using a rough `0.6 * font_size` per-character width estimate.
+    /// Returns the approximate pixel bounding box `(x, y, w, h)` of a label.
+    /// Uses the actual rasterized dimensions when available, otherwise falls
+    /// back to a rough `0.6 * font_size` per-character width estimate.
     fn label_bounds(label: &crate::text_label::TextLabel) -> (f32, f32, f32, f32) {
-        let w = (label.text.chars().count() as f32 * label.font_size * 0.6).max(label.font_size);
-        let h = label.font_size * 1.4;
+        let (w, h) = if label.rasterized_w > 0 && label.rasterized_h > 0 {
+            (label.rasterized_w as f32, label.rasterized_h as f32)
+        } else {
+            let w = (label.text.chars().count() as f32 * label.font_size * 0.6).max(label.font_size);
+            let h = label.font_size * 1.4;
+            (w, h)
+        };
         (label.x, label.y, w, h)
     }
 

@@ -65,6 +65,10 @@ pub struct TextLabel {
     pub zindex: i32,
     /// Set whenever a property changes so the GPU texture is re-uploaded.
     pub dirty: bool,
+    /// Actual pixel width of the last rasterized bitmap (0 until first render).
+    pub rasterized_w: u32,
+    /// Actual pixel height of the last rasterized bitmap (0 until first render).
+    pub rasterized_h: u32,
 }
 
 /// Fluent builder for creating a new [`TextLabel`].
@@ -134,9 +138,11 @@ impl<'a> TextLabelBuilder<'a> {
             font_size: self.font_size,
             color:     self.color,
             visible:   self.visible,
-            font_id:   self.font_id,
+            font_id:      self.font_id,
             zindex,
-            dirty:     true,
+            dirty:        true,
+            rasterized_w: 0,
+            rasterized_h: 0,
         });
         TextLabelHandle { id }
     }

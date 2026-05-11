@@ -396,7 +396,6 @@ impl<S> Window<S> {
                                 .and_then(|id| scene.world.objects.get(&id).cloned());
                             to_fire.push((EditorStateEvent::SelectionChanged, obj));
                         }
-                        // ── Label selection / move / resize events ──────────
                         let new_label_sel_id = ed.selected_label.as_ref().map(|l| l.id);
                         if prev_label_sel_id != new_label_sel_id {
                             let snap = ed.selected_label.clone();

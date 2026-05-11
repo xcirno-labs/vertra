@@ -188,6 +188,12 @@ impl Scene {
                         if w > 0 && h > 0 && !pixels.is_empty() {
                             let quad = self.pipeline.create_text_quad(*x, *y, w, h, &pixels);
                             self.text_quad_cache.insert(*id, quad);
+                            // Store actual bitmap size so the editor selection
+                            // box can use real dimensions instead of estimates.
+                            if let Some(lbl) = self.text_overlay.labels.get_mut(id) {
+                                lbl.rasterized_w = w;
+                                lbl.rasterized_h = h;
+                            }
                         }
                     }
                 }
@@ -282,7 +288,7 @@ impl Scene {
 
     /// Feed a platform-agnostic [`EditorEvent`] into the editor.
     ///
-    /// In most cases you do not call this manually — `window.rs` converts
+    /// In most cases you do not call this manually, `window.rs` converts
     /// winit events and calls this automatically when editor mode is active.
     /// Advance per-frame editor logic (WASD camera movement).
     /// Called automatically by the window loop every frame when editor mode is active.

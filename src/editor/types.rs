@@ -249,13 +249,13 @@ pub enum EditorStateEvent {
     /// The callback's `obj` parameter is the object that was being transformed.
     DragEnd,
 
-    /// The editor selection changed — an object was clicked or deselected.
+    /// The editor selection changed, an object was clicked or deselected.
     ///
     /// The callback's `obj` parameter is the newly selected object, or `None`
     /// when the selection was cleared.
     SelectionChanged,
 
-    /// The editor label selection changed — a text label was clicked or deselected.
+    /// The editor label selection changed, a text label was clicked or deselected.
     ///
     /// Contains a snapshot of the newly selected label, or `None` when the
     /// label selection was cleared.
