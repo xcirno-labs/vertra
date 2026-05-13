@@ -169,22 +169,23 @@ impl Scene {
         // Rebuild per-label GPU resources only when the label is dirty.
         // Collect label snapshots first to avoid borrowing self.text_overlay while
         // we also need self.pipeline and self.text_quad_cache.
-        // Tuple: (id, visible, dirty, x, y, zindex)
-        let mut label_snapshots: Vec<(usize, bool, bool, f32, f32, i32)> = self
+        // Tuple: (id, visible, dirty, position_dirty, x, y, zindex)
+        let mut label_snapshots: Vec<(usize, bool, bool, bool, f32, f32, i32)> = self
             .text_overlay
             .labels()
-            .map(|l| (l.id, l.visible, l.dirty, l.x, l.y, l.zindex))
+            .map(|l| (l.id, l.visible, l.dirty, l.position_dirty, l.x, l.y, l.zindex))
             .collect();
 
         // Sort by zindex so lower values are drawn first (further back).
         label_snapshots.sort_by_key(|(.., z)| *z);
 
-        for (id, _visible, dirty, x, y, _z) in &label_snapshots {
-            let needs_rebuild = *dirty || !self.text_quad_cache.contains_key(id);
-            if needs_rebuild {
-                // O(1) lookup via HashMap key.
-                if let Some(label) = self.text_overlay.labels.get(id) {
-                    if let Some((pixels, w, h)) = self.text_overlay.rasterize_label(label) {
+        for (id, _visible, dirty, position_dirty, x, y, _z) in &label_snapshots {
+            let needs_full_rebuild = *dirty || !self.text_quad_cache.contains_key(id);
+            if needs_full_rebuild {
+                // Clone the label to avoid holding both &self.text_overlay and &mut self.text_overlay.
+                let maybe_label = self.text_overlay.labels.get(id).map(|l| l.clone());
+                if let Some(label) = maybe_label {
+                    if let Some((pixels, w, h)) = self.text_overlay.rasterize_label(&label) {
                         if w > 0 && h > 0 && !pixels.is_empty() {
                             let quad = self.pipeline.create_text_quad(*x, *y, w, h, &pixels);
                             self.text_quad_cache.insert(*id, quad);
@@ -193,8 +194,30 @@ impl Scene {
                             if let Some(lbl) = self.text_overlay.labels.get_mut(id) {
                                 lbl.rasterized_w = w;
                                 lbl.rasterized_h = h;
+                                // Record the font size used for this bake so the
+                                // draft-mode path can compute the scale ratio.
+                                lbl.rasterized_font_size = lbl.font_size;
                             }
                         }
+                    }
+                }
+            } else if *position_dirty {
+                // Position-only change, or draft resize (font_size changed but no
+                // re-rasterise yet).  Scale the quad from the cached bitmap size
+                // using the ratio font_size / rasterized_font_size so the text
+                // appears at the correct visual size without any GPU texture work.
+                let (rw, rh, rfs, cur_fs) = self.text_overlay.labels.get(id)
+                    .map(|l| (l.rasterized_w, l.rasterized_h,
+                              l.rasterized_font_size, l.font_size))
+                    .unwrap_or((0, 0, 0.0, 0.0));
+                if rw > 0 && rh > 0 {
+                    let scale = if rfs > 0.0 { cur_fs / rfs } else { 1.0 };
+                    let disp_w = rw as f32 * scale;
+                    let disp_h = rh as f32 * scale;
+                    if let Some(quad) = self.text_quad_cache.get_mut(id) {
+                        let (verts, indices) =
+                            TextOverlay::build_quad(*x, *y, disp_w, disp_h);
+                        quad.mesh = self.pipeline.create_baked_mesh(&verts, &indices);
                     }
                 }
             }
@@ -203,6 +226,7 @@ impl Scene {
         // Clear dirty flags now that GPU resources are up-to-date.
         for label in self.text_overlay.labels.values_mut() {
             label.dirty = false;
+            label.position_dirty = false;
         }
 
         // Prune cache entries for labels that have been removed.

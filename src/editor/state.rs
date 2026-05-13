@@ -501,7 +501,14 @@ impl EditorState {
     /// back to a rough `0.6 * font_size` per-character width estimate.
     fn label_bounds(label: &crate::text_label::TextLabel) -> (f32, f32, f32, f32) {
         let (w, h) = if label.rasterized_w > 0 && label.rasterized_h > 0 {
-            (label.rasterized_w as f32, label.rasterized_h as f32)
+            // Scale the cached bitmap dimensions by the current font-size ratio so
+            // the bounding box tracks the draft quad size during a resize drag.
+            let scale = if label.rasterized_font_size > 0.0 {
+                label.font_size / label.rasterized_font_size
+            } else {
+                1.0
+            };
+            (label.rasterized_w as f32 * scale, label.rasterized_h as f32 * scale)
         } else {
             let w = (label.text.chars().count() as f32 * label.font_size * 0.6).max(label.font_size);
             let h = label.font_size * 1.4;
@@ -537,21 +544,25 @@ impl EditorState {
     ) -> Option<super::types::EditorStateEvent> {
         use super::types::EditorStateEvent;
         match event {
-            // ── Use raw OS motion delta for label dragging ──────────────────────
-            // `MouseMotionDelta` is a 1-to-1 physical/CSS-pixel delta straight
-            // from the OS / browser, so labels always track the cursor exactly
-            // regardless of any DPR / canvas-scale mismatch on absolute coords.
-            EditorEvent::MouseMotionDelta { dx, dy } => {
+            // ── CursorMoved drives label dragging in logical pixels ─────────────
+            // Using CursorMoved (logical pixels) instead of MouseMotionDelta
+            // (physical pixels) ensures the label tracks the cursor exactly
+            // regardless of the HiDPI scale factor.
+            EditorEvent::CursorMoved { x, y } => {
                 let drag = match self.label_drag.clone() {
                     Some(d) => d,
                     None => return None,
                 };
+                let dx = x - self.input.cursor_x;
+                let dy = y - self.input.cursor_y;
                 if let Some(label) = overlay.labels.get_mut(&drag.label_id) {
                     match drag.kind {
                         LabelDragKind::Move => {
                             label.x += dx;
                             label.y += dy;
-                            label.dirty = true;
+                            // position_dirty = true: only rebuild vertex buffer,
+                            // do NOT re-rasterize the texture.
+                            label.position_dirty = true;
                             if let Some(sel) = &mut self.selected_label {
                                 if sel.id == drag.label_id {
                                     sel.x = label.x;
@@ -560,9 +571,15 @@ impl EditorState {
                             }
                         }
                         LabelDragKind::Resize => {
-                            let new_size = (label.font_size + dx * 0.5).max(4.0);
+                            // Cap font size so the rasterised bitmap never exceeds the
+                            // GPU texture dimension limit (wgpu enforces ≤ 32768 px).
+                            const MAX_FONT_SIZE: f32 = 400.0;
+                            let new_size = (label.font_size + dx * 0.5).max(4.0).min(MAX_FONT_SIZE);
                             label.font_size = new_size;
-                            label.dirty = true;
+                            // Draft mode: only rebuild quad vertices scaled from the
+                            // cached bitmap — zero CPU rasterisation, zero GPU texture
+                            // upload.  A single full re-rasterise fires on mouse-up.
+                            label.position_dirty = true;
                             if let Some(sel) = &mut self.selected_label {
                                 if sel.id == drag.label_id {
                                     sel.font_size = new_size;
@@ -574,9 +591,15 @@ impl EditorState {
                 None
             }
 
-            // CursorMoved only tracks position for hit-testing;
-            // label movement is driven by MouseMotionDelta above.
-            EditorEvent::CursorMoved { .. } => None,
+            // MouseMotionDelta is only used for 3D orbit/pan (handled by process()).
+            // Label dragging is intentionally NOT handled here — CursorMoved above
+            // already applies the correct absolute-pixel delta.  Handling it here too
+            // would double-apply every movement, making labels/resize move 2× faster
+            // than the cursor.
+            EditorEvent::MouseMotionDelta { .. } => {
+                None
+            }
+
 
             EditorEvent::MouseButton { left: Some(true), .. } => {
                 let (cx, cy) = (self.input.cursor_x, self.input.cursor_y);
@@ -626,12 +649,25 @@ impl EditorState {
                     }
                     return Some(EditorStateEvent::LabelSelectionChanged(self.selected_label.clone()));
                 }
+                if self.selected_label.is_some() {
+                    self.selected_label = None;
+                    return Some(EditorStateEvent::LabelSelectionChanged(None));
+                }
                 None
             }
 
             EditorEvent::MouseButton { left: Some(false), .. } => {
+                // Resize drag ended: trigger one final full re-rasterisation at
+                // the committed font size now that the user has released the mouse.
+                if let Some(drag) = &self.label_drag {
+                    if drag.kind == LabelDragKind::Resize {
+                        if let Some(label) = overlay.labels.get_mut(&drag.label_id) {
+                            label.dirty = true;
+                        }
+                    }
+                }
                 let end_ev = self.label_drag.as_ref()
-                    .and_then(|d| self.selected_label.clone())
+                    .and_then(|_| self.selected_label.clone())
                     .map(EditorStateEvent::LabelDragEnd);
                 self.label_drag = None;
                 end_ev
@@ -671,7 +707,7 @@ impl EditorState {
     pub fn label_selection_overlay(
         &self,
         overlay: &crate::text_overlay::TextOverlay,
-    ) -> Option<(Vec<crate::mesh::Vertex>, Vec<u32>)> {
+    ) -> Option<(Vec<Vertex>, Vec<u32>)> {
         use crate::mesh::Vertex;
         let id = self.selected_label.as_ref()?.id;
         let label = overlay.labels.get(&id)?;
@@ -686,7 +722,7 @@ impl EditorState {
         let mut idx: Vec<u32> = Vec::new();
 
         // Helper: push a solid colour screen-space rect (x, y, w, h).
-        let mut push_rect = |verts: &mut Vec<Vertex>, idx: &mut Vec<u32>,
+        let push_rect = |verts: &mut Vec<Vertex>, idx: &mut Vec<u32>,
                              x: f32, y: f32, w: f32, h: f32, col: [f32; 3]| {
             let base = verts.len() as u32;
             verts.extend_from_slice(&[

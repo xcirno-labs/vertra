@@ -457,10 +457,24 @@ impl<S> Window<S> {
                             frame_stats.tick(dt);
                         }
                         WindowEvent::Resized(new_size) => {
+                            // Capture old surface dimensions before resize updates them.
+                            let old_w = scene.pipeline.surface_config.width as f32;
+                            let old_h = scene.pipeline.surface_config.height as f32;
                             scene.pipeline.resize(new_size);
                             scene.camera.aspect = new_size.width as f32 / new_size.height as f32;
                             if let Some(ed) = &mut scene.editor {
                                 ed.set_viewport_size(new_size.width as f32, new_size.height as f32);
+                            }
+                            // Scale text labels proportionally so they follow window size.
+                            if old_w > 0.0 && old_h > 0.0 {
+                                let sx = new_size.width  as f32 / old_w;
+                                let sy = new_size.height as f32 / old_h;
+                                for label in scene.text_overlay.labels.values_mut() {
+                                    label.x         *= sx;
+                                    label.y         *= sy;
+                                    label.font_size *= sy; // scale font by height ratio
+                                    label.dirty      = true;
+                                }
                             }
                         }
                         _ => {}

@@ -65,10 +65,17 @@ pub struct TextLabel {
     pub zindex: i32,
     /// Set whenever a property changes so the GPU texture is re-uploaded.
     pub dirty: bool,
+    /// Set when only the position (x/y) changed — rebuilds the vertex buffer
+    /// but skips the expensive CPU rasterization and GPU texture re-upload.
+    pub position_dirty: bool,
     /// Actual pixel width of the last rasterized bitmap (0 until first render).
     pub rasterized_w: u32,
     /// Actual pixel height of the last rasterized bitmap (0 until first render).
     pub rasterized_h: u32,
+    /// The `font_size` value that was in effect when the bitmap was last
+    /// rasterised.  Used to scale the on-screen quad during a resize drag
+    /// without re-rasterising (draft mode).  0.0 means "not yet rasterised".
+    pub rasterized_font_size: f32,
 }
 
 /// Fluent builder for creating a new [`TextLabel`].
@@ -138,11 +145,13 @@ impl<'a> TextLabelBuilder<'a> {
             font_size: self.font_size,
             color:     self.color,
             visible:   self.visible,
-            font_id:      self.font_id,
+            font_id:        self.font_id,
             zindex,
-            dirty:        true,
-            rasterized_w: 0,
-            rasterized_h: 0,
+            dirty:          true,
+            position_dirty: false,
+            rasterized_w:   0,
+            rasterized_h:   0,
+            rasterized_font_size: 0.0,
         });
         TextLabelHandle { id }
     }
@@ -190,7 +199,7 @@ impl TextLabelHandle {
     /// Move to a new pixel position.  Returns `false` if already removed.
     pub fn move_to(&self, overlay: &mut crate::text_overlay::TextOverlay, x: f32, y: f32) -> bool {
         if let Some(l) = overlay.labels.get_mut(&self.id) {
-            l.x = x; l.y = y; l.dirty = true; true
+            l.x = x; l.y = y; l.position_dirty = true; true
         } else { false }
     }
 
