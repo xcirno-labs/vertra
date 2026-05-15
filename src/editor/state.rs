@@ -560,6 +560,10 @@ impl EditorState {
                         LabelDragKind::Move => {
                             label.x += dx;
                             label.y += dy;
+                            // Switch to Free alignment so the dragged position is
+                            // preserved across re-bakes and window resizes.
+                            label.alignment          = crate::text_label::HorizontalAlignment::Free;
+                            label.vertical_alignment = crate::text_label::VerticalAlignment::Free;
                             // position_dirty = true: only rebuild vertex buffer,
                             // do NOT re-rasterize the texture.
                             label.position_dirty = true;

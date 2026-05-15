@@ -1,6 +1,7 @@
 use crate::text_overlay::{TextLabelHandle, TextOverlay};
 #[cfg(not(feature = "default-fonts"))]
 use crate::text_overlay::TextLabel;
+use crate::text_overlay::VerticalAlignment;
 
 #[cfg(not(feature = "default-fonts"))]
 #[test]
@@ -285,9 +286,17 @@ fn rasterize_returns_none_when_no_font_loaded() {
         visible: true,
         font_id: String::new(),
         zindex: 0,
+        alignment: crate::text_label::HorizontalAlignment::Left,
+        vertical_alignment: crate::text_label::VerticalAlignment::Top,
         dirty: true,
+        position_dirty: false,
         rasterized_h: 0,
         rasterized_w: 0,
+        rasterized_font_size: 0.0,
+        rasterized_vp_w: 0.0,
+        rasterized_vp_h: 0.0,
+        margin_x: 0.0,
+        margin_y: 0.0,
     };
     assert!(overlay.rasterize_label(&dummy).is_none());
 }
@@ -325,5 +334,67 @@ fn set_zindex_returns_false_for_missing_label() {
     let mut overlay = TextOverlay::new();
     let ghost = TextLabelHandle { id: 999 };
     assert!(!ghost.set_zindex(&mut overlay, 10));
+}
+
+#[test]
+fn builder_default_vertical_alignment_is_top() {
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("v").build();
+    assert_eq!(
+        h.label(&overlay).unwrap().vertical_alignment,
+        VerticalAlignment::Top
+    );
+}
+
+#[test]
+fn builder_with_vertical_alignment_middle() {
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("m")
+        .with_vertical_alignment(VerticalAlignment::Middle)
+        .build();
+    assert_eq!(
+        h.label(&overlay).unwrap().vertical_alignment,
+        VerticalAlignment::Middle
+    );
+}
+
+#[test]
+fn builder_with_vertical_alignment_bottom() {
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("b")
+        .with_vertical_alignment(VerticalAlignment::Bottom)
+        .build();
+    assert_eq!(
+        h.label(&overlay).unwrap().vertical_alignment,
+        VerticalAlignment::Bottom
+    );
+}
+
+#[test]
+fn set_vertical_alignment_updates_value() {
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("x").build();
+    assert!(h.set_vertical_alignment(&mut overlay, VerticalAlignment::Bottom));
+    assert_eq!(
+        h.label(&overlay).unwrap().vertical_alignment,
+        VerticalAlignment::Bottom
+    );
+}
+
+#[test]
+fn set_vertical_alignment_returns_false_for_missing_label() {
+    let mut overlay = TextOverlay::new();
+    let ghost = TextLabelHandle { id: 999 };
+    assert!(!ghost.set_vertical_alignment(&mut overlay, VerticalAlignment::Middle));
+}
+
+#[test]
+fn vertical_alignment_to_u8_roundtrip() {
+    use crate::text_label::VerticalAlignment;
+    assert_eq!(VerticalAlignment::from_u8(VerticalAlignment::Top.to_u8()),    VerticalAlignment::Top);
+    assert_eq!(VerticalAlignment::from_u8(VerticalAlignment::Middle.to_u8()), VerticalAlignment::Middle);
+    assert_eq!(VerticalAlignment::from_u8(VerticalAlignment::Bottom.to_u8()), VerticalAlignment::Bottom);
+    // Unknown values fall back to Top.
+    assert_eq!(VerticalAlignment::from_u8(99), VerticalAlignment::Top);
 }
 

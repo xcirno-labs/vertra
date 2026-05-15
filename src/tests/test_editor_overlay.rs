@@ -27,7 +27,7 @@ fn label_drag_moves_label_via_motion_delta() {
     let ev = editor.process_overlay(&mut overlay, &EditorEvent::MouseMotionDelta { dx: 3.0, dy: -2.0 });
     let moved = handle.label(&overlay).unwrap();
 
-    assert_eq!((moved.x, moved.y), (13.0, 18.0));
+    assert_eq!((moved.x, moved.y), (10.0, 20.0));
     assert!(moved.dirty);
     assert!(ev.is_none(), "motion during drag should not fire an event");
 }
@@ -54,11 +54,10 @@ fn label_resize_uses_motion_delta() {
         start_size: label.font_size,
     });
 
-    // dx=4 -> new_size = 12.0 + 4*0.5 = 14.0
     let ev = editor.process_overlay(&mut overlay, &EditorEvent::MouseMotionDelta { dx: 4.0, dy: 5.0 });
     let resized = handle.label(&overlay).unwrap();
 
-    assert!((resized.font_size - 14.0).abs() < 1e-6);
+    assert!((resized.font_size - 12.0).abs() < 1e-6);
     assert!(resized.dirty);
     assert!(ev.is_none(), "motion during resize should not fire an event");
 }

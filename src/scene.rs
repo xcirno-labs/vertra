@@ -187,7 +187,14 @@ impl Scene {
                 if let Some(label) = maybe_label {
                     if let Some((pixels, w, h)) = self.text_overlay.rasterize_label(&label) {
                         if w > 0 && h > 0 && !pixels.is_empty() {
-                            let quad = self.pipeline.create_text_quad(*x, *y, w, h, &pixels);
+                            // Resolve semantic at() values to absolute screen pixels based
+                            // on alignment, then write back so resize / editor-drag work
+                            // correctly from this point on.
+                            let vp_w = self.pipeline.surface_config.width  as f32;
+                            let vp_h = self.pipeline.surface_config.height as f32;
+                            let screen_x = resolve_screen_x(&label, w as f32, vp_w);
+                            let screen_y = resolve_screen_y(&label, h as f32, vp_h);
+                            let quad = self.pipeline.create_text_quad(screen_x, screen_y, w, h, &pixels);
                             self.text_quad_cache.insert(*id, quad);
                             // Store actual bitmap size so the editor selection
                             // box can use real dimensions instead of estimates.
@@ -197,6 +204,13 @@ impl Scene {
                                 // Record the font size used for this bake so the
                                 // draft-mode path can compute the scale ratio.
                                 lbl.rasterized_font_size = lbl.font_size;
+                                // Record the viewport size used for this bake.
+                                lbl.rasterized_vp_w = vp_w;
+                                lbl.rasterized_vp_h = vp_h;
+                                // Write back absolute screen coords so resize /
+                                // editor drag see consistent coordinates.
+                                lbl.x = screen_x;
+                                lbl.y = screen_y;
                             }
                         }
                     }
@@ -416,7 +430,41 @@ impl Scene {
     }
 }
 
-/// Traverse the object hierarchy and accumulate each object's mesh geometry
+/// Resolve the absolute screen-x for a label.
+///
+/// * `Left`   - `margin_x` is the left-edge distance → returned as-is.
+/// * `Center` - `margin_x` is ignored → returns `(vp_w − text_w) / 2`.
+/// * `Right`  - `margin_x` is the right-edge distance → `vp_w − margin_x − text_w`.
+/// * `Free`   - `label.x` is an absolute pixel coordinate → returned as-is.
+#[inline]
+fn resolve_screen_x(label: &crate::text_label::TextLabel, text_w: f32, vp_w: f32) -> f32 {
+    use crate::text_label::HorizontalAlignment;
+    match label.alignment {
+        HorizontalAlignment::Left   => label.margin_x,
+        HorizontalAlignment::Center => (vp_w - text_w) * 0.5,
+        HorizontalAlignment::Right  => vp_w - label.margin_x - text_w,
+        HorizontalAlignment::Free   => label.x,
+    }
+}
+
+/// Resolve the absolute screen-y for a label.
+///
+/// * `Top`    - `margin_y` is the top-edge distance → returned as-is.
+/// * `Middle` - `margin_y` is ignored → returns `(vp_h − text_h) / 2`.
+/// * `Bottom` - `margin_y` is the bottom-edge distance → `vp_h − margin_y − text_h`.
+/// * `Free`   - `label.y` is an absolute pixel coordinate → returned as-is.
+#[inline]
+fn resolve_screen_y(label: &crate::text_label::TextLabel, text_h: f32, vp_h: f32) -> f32 {
+    use crate::text_label::VerticalAlignment;
+    match label.vertical_alignment {
+        VerticalAlignment::Top    => label.margin_y,
+        VerticalAlignment::Middle => (vp_h - text_h) * 0.5,
+        VerticalAlignment::Bottom => vp_h - label.margin_y - text_h,
+        VerticalAlignment::Free   => label.y,
+    }
+}
+
+/// Traverse the entire scene graph and issue a single batched draw call
 /// into a bucket keyed by `texture_path`.  Objects with no geometry are skipped.
 fn collect_by_texture(
     world: &World,

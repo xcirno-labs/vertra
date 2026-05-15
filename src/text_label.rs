@@ -1,5 +1,75 @@
 //! Individual screen-space text label representation.
 
+/// Horizontal anchor mode for a text label.
+///
+/// Controls how the window resize handler repositions the label's `x`
+/// coordinate when the viewport dimensions change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HorizontalAlignment {
+    /// Fixed pixel offset from the **left** edge (default).
+    #[default]
+    Left,
+    /// Always horizontally **centred** in the viewport.
+    Center,
+    /// Fixed pixel offset from the **right** edge.
+    Right,
+    /// **Freely positioned**, no edge anchoring.
+    ///
+    /// `label.x` is treated as an absolute pixel coordinate at all times.
+    /// On window resize the position scales proportionally with the viewport
+    /// width so the label stays at the same relative position.
+    /// Editor drags are preserved across re-bakes because `resolve_screen_x`
+    /// returns `label.x` directly instead of recovering a stored margin.
+    Free,
+}
+
+impl HorizontalAlignment {
+    /// Encode as the `u8` tag used in the VTR binary format.
+    pub(crate) fn to_u8(self) -> u8 {
+        match self { Self::Left => 0, Self::Center => 1, Self::Right => 2, Self::Free => 3 }
+    }
+    /// Decode from the VTR binary tag (unknown -> `Left`).
+    pub(crate) fn from_u8(v: u8) -> Self {
+        match v { 1 => Self::Center, 2 => Self::Right, 3 => Self::Free, _ => Self::Left }
+    }
+}
+
+/// Vertical anchor mode for a text label.
+///
+/// Controls how the window resize handler and initial placement set the
+/// label's `y` screen coordinate when the viewport dimensions change.
+///
+/// `x` is always handled according to [`HorizontalAlignment`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VerticalAlignment {
+    /// Fixed pixel offset from the **top** edge (default).
+    #[default]
+    Top,
+    /// Always vertically **centred** in the viewport.
+    Middle,
+    /// Fixed pixel offset from the **bottom** edge.
+    Bottom,
+    /// **Freely positioned**, no edge anchoring.
+    ///
+    /// `label.y` is treated as an absolute pixel coordinate at all times.
+    /// On window resize the position scales proportionally with the viewport
+    /// height so the label stays at the same relative vertical position.
+    /// Editor drags are preserved across re-bakes because `resolve_screen_y`
+    /// returns `label.y` directly instead of recovering a stored margin.
+    Free,
+}
+
+impl VerticalAlignment {
+    /// Encode as the `u8` tag used in the VTR binary format.
+    pub(crate) fn to_u8(self) -> u8 {
+        match self { Self::Top => 0, Self::Middle => 1, Self::Bottom => 2, Self::Free => 3 }
+    }
+    /// Decode from the VTR binary tag (unknown -> `Top`).
+    pub(crate) fn from_u8(v: u8) -> Self {
+        match v { 1 => Self::Middle, 2 => Self::Bottom, 3 => Self::Free, _ => Self::Top }
+    }
+}
+
 /// Well-known font string IDs loaded by the `default-fonts` feature.
 ///
 /// | Variant | String ID | File                  | Font         |
@@ -46,9 +116,11 @@ pub struct TextLabel {
     pub id: usize,
     /// The string to display.
     pub text: String,
-    /// Horizontal pixel position from the left edge.
+    /// Horizontal pixel position (absolute screen x after first bake;
+    /// equals `margin_x` for Left-aligned labels).
     pub x: f32,
-    /// Vertical pixel position from the top edge.
+    /// Vertical pixel position (absolute screen y after first bake;
+    /// equals `margin_y` for Top-aligned labels).
     pub y: f32,
     /// Font size in pixels.
     pub font_size: f32,
@@ -63,6 +135,10 @@ pub struct TextLabel {
     /// Defaults to the insertion order index so that labels added later
     /// appear on top.
     pub zindex: i32,
+    /// Horizontal alignment / resize anchor for window resize handling.
+    pub alignment: HorizontalAlignment,
+    /// Vertical alignment / resize anchor for window resize handling.
+    pub vertical_alignment: VerticalAlignment,
     /// Set whenever a property changes so the GPU texture is re-uploaded.
     pub dirty: bool,
     /// Set when only the position (x/y) changed — rebuilds the vertex buffer
@@ -76,6 +152,28 @@ pub struct TextLabel {
     /// rasterised.  Used to scale the on-screen quad during a resize drag
     /// without re-rasterising (draft mode).  0.0 means "not yet rasterised".
     pub rasterized_font_size: f32,
+    /// Viewport width (pixels) at the time the bitmap was last rasterised.
+    /// 0.0 until the first render.
+    pub rasterized_vp_w: f32,
+    /// Viewport height (pixels) at the time the bitmap was last rasterised.
+    /// 0.0 until the first render.
+    pub rasterized_vp_h: f32,
+    /// The **semantic** x margin from [`TextLabelBuilder::at`].
+    ///
+    /// * `Left`   - pixels from the left edge (equals `x` at all times).
+    /// * `Center` - ignored by the renderer.
+    /// * `Right`  - pixels from the **right** edge; never changes on window resize.
+    ///
+    /// `resolve_screen_x` uses this value directly, so Right-aligned labels
+    /// always stay exactly `margin_x` pixels from the right edge regardless of
+    /// viewport size or font-size changes.
+    pub margin_x: f32,
+    /// The **semantic** y margin from [`TextLabelBuilder::at`].
+    ///
+    /// * `Top`    - pixels from the top edge (equals `y` at all times).
+    /// * `Middle` - ignored by the renderer.
+    /// * `Bottom` - pixels from the **bottom** edge; never changes on window resize.
+    pub margin_y: f32,
 }
 
 /// Fluent builder for creating a new [`TextLabel`].
@@ -84,15 +182,17 @@ pub struct TextLabel {
 /// Call [`build`](Self::build) to insert the label and receive a
 /// [`TextLabelHandle`].
 pub struct TextLabelBuilder<'a> {
-    pub(crate) overlay:   &'a mut crate::text_overlay::TextOverlay,
-    pub(crate) text:      String,
-    pub(crate) x:         f32,
-    pub(crate) y:         f32,
-    pub(crate) font_size: f32,
-    pub(crate) color:     [f32; 4],
-    pub(crate) font_id:   String,
-    pub(crate) visible:   bool,
-    pub(crate) zindex:    Option<i32>,
+    pub(crate) overlay:             &'a mut crate::text_overlay::TextOverlay,
+    pub(crate) text:                String,
+    pub(crate) x:                   f32,
+    pub(crate) y:                   f32,
+    pub(crate) font_size:           f32,
+    pub(crate) color:               [f32; 4],
+    pub(crate) font_id:             String,
+    pub(crate) visible:             bool,
+    pub(crate) zindex:              Option<i32>,
+    pub(crate) alignment:           HorizontalAlignment,
+    pub(crate) vertical_alignment:  VerticalAlignment,
 }
 
 impl<'a> TextLabelBuilder<'a> {
@@ -124,6 +224,18 @@ impl<'a> TextLabelBuilder<'a> {
         self.zindex = Some(z); self
     }
 
+    /// Set the horizontal alignment / resize anchor.
+    pub fn with_alignment(mut self, alignment: HorizontalAlignment) -> Self {
+        self.alignment = alignment;
+        self
+    }
+
+    /// Set the vertical alignment / resize anchor.
+    pub fn with_vertical_alignment(mut self, alignment: VerticalAlignment) -> Self {
+        self.vertical_alignment = alignment;
+        self
+    }
+
     /// Start the label hidden; call [`TextLabelHandle::show`] to reveal it.
     pub fn hidden(mut self) -> Self {
         self.visible = false; self
@@ -139,19 +251,25 @@ impl<'a> TextLabelBuilder<'a> {
         let zindex = self.zindex.unwrap_or(id as i32);
         self.overlay.labels.insert(id, TextLabel {
             id,
-            text:      self.text,
-            x:         self.x,
-            y:         self.y,
-            font_size: self.font_size,
-            color:     self.color,
-            visible:   self.visible,
-            font_id:        self.font_id,
+            text:               self.text,
+            x:                  self.x,
+            y:                  self.y,
+            font_size:          self.font_size,
+            color:              self.color,
+            visible:            self.visible,
+            font_id:            self.font_id,
             zindex,
-            dirty:          true,
-            position_dirty: false,
-            rasterized_w:   0,
-            rasterized_h:   0,
+            alignment:          self.alignment,
+            vertical_alignment: self.vertical_alignment,
+            dirty:              true,
+            position_dirty:     false,
+            rasterized_w:       0,
+            rasterized_h:       0,
             rasterized_font_size: 0.0,
+            rasterized_vp_w:    0.0,
+            rasterized_vp_h:    0.0,
+            margin_x:           self.x,
+            margin_y:           self.y,
         });
         TextLabelHandle { id }
     }
@@ -229,6 +347,20 @@ impl TextLabelHandle {
     pub fn set_zindex(&self, overlay: &mut crate::text_overlay::TextOverlay, z: i32) -> bool {
         if let Some(l) = overlay.labels.get_mut(&self.id) {
             l.zindex = z; true
+        } else { false }
+    }
+
+    /// Set the horizontal alignment / resize anchor.  Returns `false` if removed.
+    pub fn set_alignment(&self, overlay: &mut crate::text_overlay::TextOverlay, alignment: HorizontalAlignment) -> bool {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
+            l.alignment = alignment; true
+        } else { false }
+    }
+
+    /// Set the vertical alignment / resize anchor.  Returns `false` if removed.
+    pub fn set_vertical_alignment(&self, overlay: &mut crate::text_overlay::TextOverlay, alignment: VerticalAlignment) -> bool {
+        if let Some(l) = overlay.labels.get_mut(&self.id) {
+            l.vertical_alignment = alignment; true
         } else { false }
     }
 

@@ -465,15 +465,80 @@ impl<S> Window<S> {
                             if let Some(ed) = &mut scene.editor {
                                 ed.set_viewport_size(new_size.width as f32, new_size.height as f32);
                             }
-                            // Scale text labels proportionally so they follow window size.
+                            // Reposition text labels according to their alignment.
                             if old_w > 0.0 && old_h > 0.0 {
-                                let sx = new_size.width  as f32 / old_w;
-                                let sy = new_size.height as f32 / old_h;
+                                use crate::text_label::{HorizontalAlignment, VerticalAlignment};
+                                let sx    = new_size.width  as f32 / old_w;
+                                let sy    = new_size.height as f32 / old_h;
+                                let new_w = new_size.width  as f32;
+                                let new_h = new_size.height as f32;
                                 for label in scene.text_overlay.labels.values_mut() {
-                                    label.x         *= sx;
-                                    label.y         *= sy;
-                                    label.font_size *= sy; // scale font by height ratio
-                                    label.dirty      = true;
+                                    let new_fs = label.font_size * sy;
+                                    let scale_ratio = new_fs / label.font_size.max(0.001);
+                                    let new_rw_i = (label.rasterized_w as f32 * scale_ratio).max(1.0).round() as u32;
+                                    let new_rh_i = (label.rasterized_h as f32 * scale_ratio).max(1.0).round() as u32;
+                                    let new_rw = new_rw_i as f32;
+                                    let new_rh = new_rh_i as f32;
+
+                                    if label.rasterized_w > 0 && label.rasterized_h > 0 {
+                                        let old_rw = label.rasterized_w as f32;
+                                        let old_rh = label.rasterized_h as f32;
+
+                                        // Horizontal repositioning.
+                                        label.x = match label.alignment {
+                                            HorizontalAlignment::Left   => label.x,
+                                            HorizontalAlignment::Center => new_w * 0.5 - new_rw * 0.5,
+                                            HorizontalAlignment::Right  => new_w - label.margin_x - new_rw,
+                                            // Free: scale centre proportionally with viewport width.
+                                            HorizontalAlignment::Free   => {
+                                                let cx = label.x + old_rw * 0.5;
+                                                cx * sx - new_rw * 0.5
+                                            }
+                                        };
+
+                                        // Vertical repositioning.
+                                        label.y = match label.vertical_alignment {
+                                            VerticalAlignment::Top => {
+                                                let cy = label.y + old_rh * 0.5;
+                                                let new_y = cy * sy - new_rh * 0.5;
+                                                label.margin_y = new_y;
+                                                new_y
+                                            }
+                                            VerticalAlignment::Middle => new_h * 0.5 - new_rh * 0.5,
+                                            VerticalAlignment::Bottom => new_h - label.margin_y - new_rh,
+                                            // Free: scale centre proportionally with viewport height.
+                                            VerticalAlignment::Free => {
+                                                let cy = label.y + old_rh * 0.5;
+                                                cy * sy - new_rh * 0.5
+                                            }
+                                        };
+
+                                        label.rasterized_w         = new_rw_i;
+                                        label.rasterized_h         = new_rh_i;
+                                        label.rasterized_font_size = new_fs;
+                                    } else {
+                                        // Not yet rasterised, update draft position where possible.
+                                        let est_w = label.text.chars().count() as f32 * new_fs * 0.6;
+                                        label.x = match label.alignment {
+                                            HorizontalAlignment::Left   => label.x,
+                                            HorizontalAlignment::Center => new_w * 0.5 - est_w * 0.5,
+                                            HorizontalAlignment::Right  => label.x, // margin_x unchanged
+                                            HorizontalAlignment::Free   => label.x * sx,
+                                        };
+                                        match label.vertical_alignment {
+                                            VerticalAlignment::Top => {
+                                                label.y      *= sy;
+                                                label.margin_y = label.y;
+                                            }
+                                            VerticalAlignment::Free => {
+                                                label.y *= sy;
+                                            }
+                                            VerticalAlignment::Middle |
+                                            VerticalAlignment::Bottom => {}
+                                        }
+                                    }
+                                    label.font_size = new_fs;
+                                    label.dirty     = true;
                                 }
                             }
                         }

@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 use crate::mesh::Vertex;
-pub use crate::text_label::{TextLabel, TextLabelBuilder, TextLabelHandle};
+pub use crate::text_label::{TextLabel, TextLabelBuilder, TextLabelHandle, HorizontalAlignment, VerticalAlignment};
 #[cfg(feature = "default-fonts")]
 pub use crate::text_label::DefaultFont;
 use crate::text_label::rasterize_text;
@@ -42,6 +42,16 @@ pub struct TextOverlay {
 
 impl Default for TextOverlay {
     fn default() -> Self { Self::new() }
+}
+
+impl std::fmt::Debug for TextOverlay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextOverlay")
+            .field("labels", &self.labels)
+            .field("next_id", &self.next_id)
+            .field("fonts (count)", &self.fonts.len())
+            .finish()
+    }
 }
 
 impl TextOverlay {
@@ -137,15 +147,17 @@ impl TextOverlay {
     /// ```
     pub fn add_label(&mut self, text: impl Into<String>) -> TextLabelBuilder<'_> {
         TextLabelBuilder {
-            overlay:   self,
-            text:      text.into(),
-            x:         0.0,
-            y:         0.0,
-            font_size: 16.0,
-            color:     [1.0, 1.0, 1.0, 1.0],
-            font_id:   String::new(), // empty = first loaded font
-            visible:   true,
-            zindex:    None,          // defaults to insertion order in build()
+            overlay:            self,
+            text:               text.into(),
+            x:                  0.0,
+            y:                  0.0,
+            font_size:          16.0,
+            color:              [1.0, 1.0, 1.0, 1.0],
+            font_id:            String::new(), // empty = first loaded font
+            visible:            true,
+            zindex:             None,          // defaults to insertion order in build()
+            alignment:          HorizontalAlignment::Left,
+            vertical_alignment: VerticalAlignment::Top,
         }
     }
 
@@ -188,5 +200,3 @@ impl TextOverlay {
         (verts, vec![0u32, 1, 2, 0, 2, 3])
     }
 }
-
-
