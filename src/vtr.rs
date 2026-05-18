@@ -54,8 +54,9 @@
 //! │    font_size:   f32 LE                                       │
 //! │    color[4]:    f32 LE × 4                                   │
 //! │    visible:     u8  (1 = visible)                            │
-//! │    zindex:      i32 LE                                       │
-//! │    alignment:   u8  (0=Left 1=Center 2=Right)                │
+//! │    zindex:               i32 LE                              │
+//! │    horizontal_alignment: u8  (0=Left 1=Center 2=Right 3=Free)│
+//! │    vertical_alignment:   u8  (0=Top 1=Middle 2=Bottom 3=Free)│
 //! │    font_id_len: u16 LE                                       │
 //! │    font_id:     utf-8 bytes [font_id_len]                    │
 //! │    text_len:    u32 LE                                       │
@@ -144,6 +145,8 @@ pub enum VtrError {
     TexturePathTooLong { len: usize },
     /// A label's `text` field exceeds `u32::MAX` bytes.
     LabelTextTooLong { len: usize },
+    /// A label's `font_id` field exceeds `u16::MAX` bytes.
+    FontIdTooLong { len: usize },
 }
 
 impl std::fmt::Display for VtrError {
@@ -178,6 +181,14 @@ impl std::fmt::Display for VtrError {
                     "label text is {len} bytes, which exceeds the maximum \
                      of {} bytes allowed by the VTR u32 length field",
                     u32::MAX
+                )
+            }
+            VtrError::FontIdTooLong { len } => {
+                write!(
+                    f,
+                    "font_id is {len} bytes, which exceeds the maximum \
+                     of {} bytes allowed by the VTR u16 length field",
+                    u16::MAX
                 )
             }
         }
@@ -372,13 +383,16 @@ fn write_text_overlay(w: &mut impl Write, overlay: &TextOverlay) -> Result<(), V
         w_f32x4(w, lbl.color)?;
         w.write_all(&[lbl.visible as u8])?;
         w_i32(w, lbl.zindex)?;
-        w.write_all(&[lbl.alignment.to_u8()])?;
+        w.write_all(&[lbl.horizontal_alignment.to_u8()])?;
         w.write_all(&[lbl.vertical_alignment.to_u8()])?;
 
         let font_id_bytes = lbl.font_id.as_bytes();
-        let font_id_len = font_id_bytes.len().min(u16::MAX as usize) as u16;
+        if font_id_bytes.len() > u16::MAX as usize {
+            return Err(VtrError::FontIdTooLong { len: font_id_bytes.len() });
+        }
+        let font_id_len = font_id_bytes.len() as u16;
         w_u16(w, font_id_len)?;
-        w.write_all(&font_id_bytes[..font_id_len as usize])?;
+        w.write_all(font_id_bytes)?;
 
         let text_bytes = lbl.text.as_bytes();
         if text_bytes.len() > u32::MAX as usize {
@@ -403,7 +417,7 @@ fn read_text_overlay(r: &mut impl Read, format_version: u16) -> Result<TextOverl
         let color     = r_f32x4(r)?;
         let visible   = r_u8(r)? != 0;
         let zindex    = r_i32(r)?;
-        let alignment = HorizontalAlignment::from_u8(r_u8(r)?);
+        let horizontal_alignment = HorizontalAlignment::from_u8(r_u8(r)?);
         let vertical_alignment = if format_version >= 3 {
             VerticalAlignment::from_u8(r_u8(r)?)
         } else {
@@ -422,7 +436,7 @@ fn read_text_overlay(r: &mut impl Read, format_version: u16) -> Result<TextOverl
 
         labels.insert(id, TextLabel {
             id, text, font_size, color, visible, font_id,
-            zindex, alignment, vertical_alignment,
+            zindex, horizontal_alignment, vertical_alignment,
             // V3+: x/y fields in file are semantic margins (margin_x/margin_y).
             x,
             y,

@@ -29,7 +29,7 @@ fn label_drag_moves_label_via_motion_delta() {
 
     assert_eq!((moved.x, moved.y), (10.0, 20.0));
     assert!(moved.dirty);
-    assert!(ev.is_none(), "motion during drag should not fire an event");
+    assert!(ev.is_none(), "MouseMotionDelta is ignored by the label editor, no event must be returned");
 }
 
 #[test]

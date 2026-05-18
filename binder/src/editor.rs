@@ -352,6 +352,12 @@ impl Editor {
 
     /// Move the selected label to `(x, y)` pixels from the top-left corner.
     /// Returns `false` if no label is selected or the label was removed.
+    ///
+    /// Switches both [`HorizontalAlignment`][vertra::text_label::HorizontalAlignment] and
+    /// [`VerticalAlignment`][vertra::text_label::VerticalAlignment] to `Free` so that the
+    /// new position is preserved across re-bakes.  Without this, any non-`Free`
+    /// alignment would cause `resolve_screen_x` / `resolve_screen_y` to snap the
+    /// label back to its original margin-based location on the next full re-bake.
     pub fn move_selected_label(&mut self, x: f32, y: f32) -> bool {
         unsafe {
             let scene = &mut *self.scene;
@@ -360,9 +366,13 @@ impl Editor {
                 None     => return false,
             };
             if let Some(label) = scene.text_overlay.labels.get_mut(&id) {
-                label.x     = x;
-                label.y     = y;
-                label.dirty = true;
+                label.x                   = x;
+                label.y                   = y;
+                label.margin_x            = x;
+                label.margin_y            = y;
+                label.horizontal_alignment = vertra::text_label::HorizontalAlignment::Free;
+                label.vertical_alignment   = vertra::text_label::VerticalAlignment::Free;
+                label.dirty               = true;
             } else { return false; }
             if let Some(ed) = &mut scene.editor {
                 if let Some(sel) = &mut ed.selected_label {

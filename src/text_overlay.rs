@@ -155,9 +155,9 @@ impl TextOverlay {
             color:              [1.0, 1.0, 1.0, 1.0],
             font_id:            String::new(), // empty = first loaded font
             visible:            true,
-            zindex:             None,          // defaults to insertion order in build()
-            alignment:          HorizontalAlignment::Left,
-            vertical_alignment: VerticalAlignment::Top,
+            zindex:               None,          // defaults to insertion order in build()
+            horizontal_alignment: HorizontalAlignment::Left,
+            vertical_alignment:   VerticalAlignment::Top,
         }
     }
 

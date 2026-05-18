@@ -175,6 +175,111 @@ fn move_to_changes_position() {
     assert_eq!(label.y, 200.0);
 }
 
+/// move_to must switch both alignments to Free.  Without this, the next
+/// full re-bake would call resolve_screen_x / resolve_screen_y which use the
+/// unchanged margin fields and silently snap the label back.
+#[test]
+fn move_to_switches_alignment_to_free() {
+    use crate::text_label::{HorizontalAlignment, VerticalAlignment};
+    let mut overlay = TextOverlay::new();
+    // Start with non-Free alignments.
+    let h = overlay
+        .add_label("snap")
+        .with_horizontal_alignment(HorizontalAlignment::Right)
+        .with_vertical_alignment(VerticalAlignment::Bottom)
+        .build();
+    h.move_to(&mut overlay, 300.0, 150.0);
+    let label = h.label(&overlay).unwrap();
+    assert_eq!(label.horizontal_alignment, HorizontalAlignment::Free,
+        "move_to must switch horizontal_alignment to Free");
+    assert_eq!(label.vertical_alignment, VerticalAlignment::Free,
+        "move_to must switch vertical_alignment to Free");
+}
+
+/// move_to must update margin_x / margin_y to match the new absolute
+/// position so that Free mode records the correct anchor.
+#[test]
+fn move_to_updates_margins() {
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("m").at(10.0, 20.0).build();
+    h.move_to(&mut overlay, 300.0, 150.0);
+    let label = h.label(&overlay).unwrap();
+    assert_eq!(label.margin_x, 300.0, "margin_x should be updated to the new x");
+    assert_eq!(label.margin_y, 150.0, "margin_y should be updated to the new y");
+}
+
+/// After move_to the position_dirty flag must be set so the vertex buffer
+/// is rebuilt without a full GPU texture re-upload.
+#[test]
+fn move_to_sets_position_dirty() {
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("pd").build();
+    // Clear the dirty flag that build() sets.
+    if let Some(l) = overlay.labels.get_mut(&h.id) { l.dirty = false; l.position_dirty = false; }
+    h.move_to(&mut overlay, 50.0, 60.0);
+    let label = h.label(&overlay).unwrap();
+    assert!(label.position_dirty, "move_to must set position_dirty");
+    assert!(!label.dirty,         "move_to must NOT trigger a full re-rasterise (dirty)");
+}
+
+/// A Center-aligned label moved with move_to must stay at the new position
+/// (Free alignment) rather than being re-centered by resolve_screen_x.
+#[test]
+fn move_to_on_center_aligned_preserves_position() {
+    use crate::text_label::HorizontalAlignment;
+    let mut overlay = TextOverlay::new();
+    let h = overlay
+        .add_label("centre")
+        .with_horizontal_alignment(HorizontalAlignment::Center)
+        .build();
+    h.move_to(&mut overlay, 42.0, 0.0);
+    let label = h.label(&overlay).unwrap();
+    assert_eq!(label.x, 42.0);
+    assert_eq!(label.horizontal_alignment, HorizontalAlignment::Free);
+}
+
+/// A Middle-aligned label moved with move_to must stay at the new vertical
+/// position (Free) rather than being re-centred by resolve_screen_y.
+#[test]
+fn move_to_on_middle_aligned_preserves_vertical_position() {
+    use crate::text_label::VerticalAlignment;
+    let mut overlay = TextOverlay::new();
+    let h = overlay
+        .add_label("middle")
+        .with_vertical_alignment(VerticalAlignment::Middle)
+        .build();
+    h.move_to(&mut overlay, 0.0, 99.0);
+    let label = h.label(&overlay).unwrap();
+    assert_eq!(label.y, 99.0);
+    assert_eq!(label.vertical_alignment, VerticalAlignment::Free);
+}
+
+/// move_to on an already-Free label preserves x/y and keeps Free alignment.
+#[test]
+fn move_to_on_free_label_stays_free() {
+    use crate::text_label::{HorizontalAlignment, VerticalAlignment};
+    let mut overlay = TextOverlay::new();
+    let h = overlay
+        .add_label("free")
+        .with_horizontal_alignment(HorizontalAlignment::Free)
+        .with_vertical_alignment(VerticalAlignment::Free)
+        .build();
+    h.move_to(&mut overlay, 7.0, 8.0);
+    let label = h.label(&overlay).unwrap();
+    assert_eq!(label.x, 7.0);
+    assert_eq!(label.y, 8.0);
+    assert_eq!(label.horizontal_alignment, HorizontalAlignment::Free);
+    assert_eq!(label.vertical_alignment,   VerticalAlignment::Free);
+}
+
+/// move_to returns false for a label that has already been removed.
+#[test]
+fn move_to_returns_false_for_missing_label() {
+    let mut overlay = TextOverlay::new();
+    let ghost = TextLabelHandle { id: 9999 };
+    assert!(!ghost.move_to(&mut overlay, 1.0, 2.0));
+}
+
 #[test]
 fn set_color_changes_rgba() {
     let mut overlay = TextOverlay::new();
@@ -286,7 +391,7 @@ fn rasterize_returns_none_when_no_font_loaded() {
         visible: true,
         font_id: String::new(),
         zindex: 0,
-        alignment: crate::text_label::HorizontalAlignment::Left,
+        horizontal_alignment: crate::text_label::HorizontalAlignment::Left,
         vertical_alignment: crate::text_label::VerticalAlignment::Top,
         dirty: true,
         position_dirty: false,

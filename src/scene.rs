@@ -338,7 +338,7 @@ impl Scene {
 
     /// Feed a platform-agnostic [`EditorEvent`] into the editor.
     ///
-    /// **Default keybind — `Escape`:** pressing Escape while editor mode is
+    /// **Default keybind - `Escape`:** pressing Escape while editor mode is
     /// active automatically calls [`Self::disable_editor_mode`], switching the
     /// engine to play mode before any further processing occurs.
     /// Returns an [`EditorStateEvent`] when the label editor produced a state
@@ -439,7 +439,7 @@ impl Scene {
 #[inline]
 fn resolve_screen_x(label: &crate::text_label::TextLabel, text_w: f32, vp_w: f32) -> f32 {
     use crate::text_label::HorizontalAlignment;
-    match label.alignment {
+    match label.horizontal_alignment {
         HorizontalAlignment::Left   => label.margin_x,
         HorizontalAlignment::Center => (vp_w - text_w) * 0.5,
         HorizontalAlignment::Right  => vp_w - label.margin_x - text_w,

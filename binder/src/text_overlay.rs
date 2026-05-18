@@ -90,7 +90,7 @@ impl TextOverlay {
                 .at(x, y)
                 .with_font_size(font_size)
                 .with_color(c)
-                .with_alignment(align)
+                .with_horizontal_alignment(align)
                 .with_vertical_alignment(valign);
             if let Some(fid) = font_id {
                 builder = builder.with_font(fid);
@@ -199,9 +199,9 @@ impl TextLabel {
     /// Set the horizontal alignment / resize anchor.
     /// Accepted values: `"left"` (default), `"center"`, `"right"`, `free`.
     #[wasm_bindgen(setter)]
-    pub fn set_alignment(&mut self, alignment: String) {
+    pub fn set_horizontal_alignment(&mut self, alignment: String) {
         let a = parse_alignment(Some(&alignment));
-        unsafe { TextLabelHandle { id: self.id }.set_alignment(&mut *self.overlay, a); }
+        unsafe { TextLabelHandle { id: self.id }.set_horizontal_alignment(&mut *self.overlay, a); }
     }
 
     /// Set the vertical alignment / resize anchor.

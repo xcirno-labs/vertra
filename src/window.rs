@@ -485,7 +485,7 @@ impl<S> Window<S> {
                                         let old_rh = label.rasterized_h as f32;
 
                                         // Horizontal repositioning.
-                                        label.x = match label.alignment {
+                                        label.x = match label.horizontal_alignment {
                                             HorizontalAlignment::Left   => label.x,
                                             HorizontalAlignment::Center => new_w * 0.5 - new_rw * 0.5,
                                             HorizontalAlignment::Right  => new_w - label.margin_x - new_rw,
@@ -519,7 +519,7 @@ impl<S> Window<S> {
                                     } else {
                                         // Not yet rasterised, update draft position where possible.
                                         let est_w = label.text.chars().count() as f32 * new_fs * 0.6;
-                                        label.x = match label.alignment {
+                                        label.x = match label.horizontal_alignment {
                                             HorizontalAlignment::Left   => label.x,
                                             HorizontalAlignment::Center => new_w * 0.5 - est_w * 0.5,
                                             HorizontalAlignment::Right  => label.x, // margin_x unchanged

@@ -72,14 +72,14 @@ fn v3_single_label_roundtrip() {
 #[test]
 fn v3_label_alignment_roundtrip() {
     let mut overlay = TextOverlay::new();
-    let l = overlay.add_label("L").with_alignment(HorizontalAlignment::Left).build();
-    let c = overlay.add_label("C").with_alignment(HorizontalAlignment::Center).build();
-    let r = overlay.add_label("R").with_alignment(HorizontalAlignment::Right).build();
+    let l = overlay.add_label("L").with_horizontal_alignment(HorizontalAlignment::Left).build();
+    let c = overlay.add_label("C").with_horizontal_alignment(HorizontalAlignment::Center).build();
+    let r = overlay.add_label("R").with_horizontal_alignment(HorizontalAlignment::Right).build();
 
     let data = roundtrip_with_overlay(&test_camera(), &World::new(), &overlay);
-    assert_eq!(data.text_overlay.labels[&l.id].alignment, HorizontalAlignment::Left);
-    assert_eq!(data.text_overlay.labels[&c.id].alignment, HorizontalAlignment::Center);
-    assert_eq!(data.text_overlay.labels[&r.id].alignment, HorizontalAlignment::Right);
+    assert_eq!(data.text_overlay.labels[&l.id].horizontal_alignment, HorizontalAlignment::Left);
+    assert_eq!(data.text_overlay.labels[&c.id].horizontal_alignment, HorizontalAlignment::Center);
+    assert_eq!(data.text_overlay.labels[&r.id].horizontal_alignment, HorizontalAlignment::Right);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn v3_combined_alignment_roundtrip() {
     // Verify both h- and v-alignment survive a full round-trip together.
     let mut overlay = TextOverlay::new();
     let h = overlay.add_label("BR")
-        .with_alignment(HorizontalAlignment::Right)
+        .with_horizontal_alignment(HorizontalAlignment::Right)
         .with_vertical_alignment(VerticalAlignment::Bottom)
         .at(20.0, 20.0)
         .with_font_size(18.0)
@@ -108,8 +108,8 @@ fn v3_combined_alignment_roundtrip() {
 
     let data = roundtrip_with_overlay(&test_camera(), &World::new(), &overlay);
     let lbl = &data.text_overlay.labels[&h.id];
-    assert_eq!(lbl.alignment, HorizontalAlignment::Right);
-    assert_eq!(lbl.vertical_alignment, VerticalAlignment::Bottom);
+    assert_eq!(lbl.horizontal_alignment, HorizontalAlignment::Right);
+    assert_eq!(lbl.vertical_alignment,   VerticalAlignment::Bottom);
     assert_eq!(lbl.x, 20.0);
     assert_eq!(lbl.y, 20.0);
 }
@@ -184,7 +184,7 @@ fn v3_idempotent_with_labels() {
         .add_label("Hi")
         .at(5.0, 5.0)
         .with_font_size(16.0)
-        .with_alignment(HorizontalAlignment::Center)
+        .with_horizontal_alignment(HorizontalAlignment::Center)
         .build();
 
     let camera = custom_camera();
@@ -275,10 +275,106 @@ fn v3_file_reads_with_top_vertical_alignment() {
     assert_eq!(data.text_overlay.label_count(), 1);
     let lbl = data.text_overlay.labels.values().next().unwrap();
     assert_eq!(lbl.text, "Hi");
-    assert_eq!(lbl.alignment, HorizontalAlignment::Right,
-               "alignment should be Right as written");
+    assert_eq!(lbl.horizontal_alignment, HorizontalAlignment::Right,
+        "horizontal_alignment should be Right as written");
     assert_eq!(lbl.vertical_alignment, VerticalAlignment::Top,
         "vertical_alignment byte 0 must decode to Top");
+}
+
+
+#[test]
+fn font_id_normal_roundtrip() {
+    // A normal font_id string (non-empty, well under u16::MAX) must round-trip.
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("Hello")
+        .with_font("sans")
+        .with_font_size(18.0)
+        .build();
+    // Set the font_id directly to a known value to guarantee what is tested.
+    overlay.labels.get_mut(&h.id).unwrap().font_id = "my-font-id".to_string();
+
+    let data = roundtrip_with_overlay(&test_camera(), &World::new(), &overlay);
+    assert_eq!(
+        data.text_overlay.labels[&h.id].font_id, "my-font-id",
+        "font_id must survive a VTR roundtrip"
+    );
+}
+
+#[test]
+fn font_id_empty_roundtrip() {
+    // An empty font_id (meaning "use first loaded font") must also round-trip.
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("Empty font").build();
+    overlay.labels.get_mut(&h.id).unwrap().font_id = String::new();
+
+    let data = roundtrip_with_overlay(&test_camera(), &World::new(), &overlay);
+    assert_eq!(
+        data.text_overlay.labels[&h.id].font_id, "",
+        "empty font_id must survive a VTR roundtrip"
+    );
+}
+
+#[test]
+fn font_id_max_valid_length_roundtrip() {
+    // Exactly u16::MAX bytes must be accepted without error.
+    let big_id = "x".repeat(u16::MAX as usize);
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("Max font id").build();
+    overlay.labels.get_mut(&h.id).unwrap().font_id = big_id.clone();
+
+    let data = roundtrip_with_overlay(&test_camera(), &World::new(), &overlay);
+    assert_eq!(
+        data.text_overlay.labels[&h.id].font_id.len(),
+        u16::MAX as usize,
+        "u16::MAX-length font_id must round-trip intact"
+    );
+}
+
+#[test]
+fn font_id_too_long_returns_error() {
+    // A font_id longer than u16::MAX bytes must be rejected with FontIdTooLong,
+    // not silently truncate the stored length while writing the full payload.
+    let too_long = "x".repeat(u16::MAX as usize + 1);
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("Overflow font id").build();
+    overlay.labels.get_mut(&h.id).unwrap().font_id = too_long;
+
+    let mut buf = Vec::new();
+    let result = vtr::write_scene(&mut buf, &test_camera(), &World::new(), &overlay);
+    assert!(
+        matches!(result, Err(vtr::VtrError::FontIdTooLong { .. })),
+        "expected FontIdTooLong, got {result:?}"
+    );
+}
+
+#[test]
+fn font_id_too_long_not_truncated() {
+    // Verify the buf is empty/unchanged: with the silent-clamp bug the writer
+    // would have partially written the file before (or after) the bad length.
+    let too_long = "x".repeat(u16::MAX as usize + 1);
+    let mut overlay = TextOverlay::new();
+    let h = overlay.add_label("Overflow").build();
+    overlay.labels.get_mut(&h.id).unwrap().font_id = too_long;
+
+    let mut buf = Vec::new();
+    let _ = vtr::write_scene(&mut buf, &test_camera(), &World::new(), &overlay);
+    // The error must be returned *before* any font_id bytes are written,
+    // so the reader must not be able to parse the partial output.
+    if !buf.is_empty() {
+        let result = vtr::read(&mut Cursor::new(&buf));
+        assert!(
+            result.is_err(),
+            "partial output produced by a failing write must not be parseable"
+        );
+    }
+}
+
+#[test]
+fn font_id_error_display() {
+    let e = vtr::VtrError::FontIdTooLong { len: 70_000 };
+    let s = e.to_string();
+    assert!(s.contains("70000") || s.contains("70_000"), "display should mention the length: {s}");
+    assert!(s.contains("65535") || s.contains("u16"), "display should mention the limit: {s}");
 }
 
 

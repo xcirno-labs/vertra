@@ -470,7 +470,6 @@ impl EditorState {
     }
 
     fn screen_to_ray(&self, camera: &Camera, sx: f32, sy: f32) -> ([f32; 3], [f32; 3]) {
-        // ...existing code...
         let x_ndc = 2.0 * sx / self.viewport_width - 1.0;
         let y_ndc = 1.0 - 2.0 * sy / self.viewport_height;
         let fwd = v3_norm(v3_sub(camera.target, camera.eye));
@@ -562,7 +561,7 @@ impl EditorState {
                             label.y += dy;
                             // Switch to Free alignment so the dragged position is
                             // preserved across re-bakes and window resizes.
-                            label.alignment          = crate::text_label::HorizontalAlignment::Free;
+                            label.horizontal_alignment = crate::text_label::HorizontalAlignment::Free;
                             label.vertical_alignment = crate::text_label::VerticalAlignment::Free;
                             // position_dirty = true: only rebuild vertex buffer,
                             // do NOT re-rasterize the texture.

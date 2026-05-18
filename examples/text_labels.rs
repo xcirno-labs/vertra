@@ -52,7 +52,6 @@ fn main() {
                 },
                 None,
             );
-            scene.text_overlay.load_default_fonts();
             // Left-aligned label (default, anchored to left edge)
             scene.text_overlay
                 .add_label("Left-aligned  (sans)")
@@ -60,7 +59,7 @@ fn main() {
                 .with_font_size(22.0)
                 .with_font("sans")
                 .with_color([0.3, 1.0, 0.6, 1.0])
-                .with_alignment(HorizontalAlignment::Left)
+                .with_horizontal_alignment(HorizontalAlignment::Left)
                 .with_zindex(10)
                 .build();
 
@@ -71,7 +70,7 @@ fn main() {
                 .with_font_size(22.0)
                 .with_font("mono")
                 .with_color([1.0, 1.0, 0.3, 1.0])
-                .with_alignment(HorizontalAlignment::Free)
+                .with_horizontal_alignment(HorizontalAlignment::Center)
                 .with_zindex(11)
                 .build();
 
@@ -82,7 +81,7 @@ fn main() {
                 .with_font_size(22.0)
                 .with_font("serif")
                 .with_color([1.0, 0.5, 0.3, 1.0])
-                .with_alignment(HorizontalAlignment::Right)
+                .with_horizontal_alignment(HorizontalAlignment::Right)
                 .with_zindex(12)
                 .build();
 
@@ -93,7 +92,7 @@ fn main() {
                 .with_font_size(20.0)
                 .with_font("sans")
                 .with_color([0.7, 0.4, 1.0, 1.0])
-                .with_alignment(HorizontalAlignment::Center)
+                .with_horizontal_alignment(HorizontalAlignment::Center)
                 .with_vertical_alignment(VerticalAlignment::Bottom)
                 .with_zindex(13)
                 .build();
@@ -105,7 +104,7 @@ fn main() {
                 .with_font_size(16.0)
                 .with_font("sans")
                 .with_color([0.7, 0.7, 0.7, 1.0])
-                .with_alignment(HorizontalAlignment::Left)
+                .with_horizontal_alignment(HorizontalAlignment::Left)
                 .with_zindex(5)
                 .hidden()
                 .build();
@@ -118,7 +117,7 @@ fn main() {
                 .with_font_size(18.0)
                 .with_font("mono")
                 .with_color([0.9, 0.9, 0.9, 1.0])
-                .with_alignment(HorizontalAlignment::Left)
+                .with_horizontal_alignment(HorizontalAlignment::Left)
                 .with_zindex(20)
                 .build();
 

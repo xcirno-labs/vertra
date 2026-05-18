@@ -136,7 +136,7 @@ pub struct TextLabel {
     /// appear on top.
     pub zindex: i32,
     /// Horizontal alignment / resize anchor for window resize handling.
-    pub alignment: HorizontalAlignment,
+    pub horizontal_alignment: HorizontalAlignment,
     /// Vertical alignment / resize anchor for window resize handling.
     pub vertical_alignment: VerticalAlignment,
     /// Set whenever a property changes so the GPU texture is re-uploaded.
@@ -191,7 +191,7 @@ pub struct TextLabelBuilder<'a> {
     pub(crate) font_id:             String,
     pub(crate) visible:             bool,
     pub(crate) zindex:              Option<i32>,
-    pub(crate) alignment:           HorizontalAlignment,
+    pub(crate) horizontal_alignment: HorizontalAlignment,
     pub(crate) vertical_alignment:  VerticalAlignment,
 }
 
@@ -225,8 +225,8 @@ impl<'a> TextLabelBuilder<'a> {
     }
 
     /// Set the horizontal alignment / resize anchor.
-    pub fn with_alignment(mut self, alignment: HorizontalAlignment) -> Self {
-        self.alignment = alignment;
+    pub fn with_horizontal_alignment(mut self, alignment: HorizontalAlignment) -> Self {
+        self.horizontal_alignment = alignment;
         self
     }
 
@@ -259,7 +259,7 @@ impl<'a> TextLabelBuilder<'a> {
             visible:            self.visible,
             font_id:            self.font_id,
             zindex,
-            alignment:          self.alignment,
+            horizontal_alignment: self.horizontal_alignment,
             vertical_alignment: self.vertical_alignment,
             dirty:              true,
             position_dirty:     false,
@@ -315,9 +315,24 @@ impl TextLabelHandle {
     }
 
     /// Move to a new pixel position.  Returns `false` if already removed.
+    ///
+    /// Switches both [`HorizontalAlignment`] and [`VerticalAlignment`] to
+    /// [`HorizontalAlignment::Free`] / [`VerticalAlignment::Free`] so that the
+    /// new position is preserved across re-bakes.  Without switching to `Free`,
+    /// any non-`Free` alignment would cause `resolve_screen_x` /
+    /// `resolve_screen_y` to recompute the position from the unchanged
+    /// `margin_x` / `margin_y` on the next full re-bake (e.g. after `set_text`
+    /// or a window resize), silently undoing the move.
     pub fn move_to(&self, overlay: &mut crate::text_overlay::TextOverlay, x: f32, y: f32) -> bool {
         if let Some(l) = overlay.labels.get_mut(&self.id) {
-            l.x = x; l.y = y; l.position_dirty = true; true
+            l.x = x;
+            l.y = y;
+            l.margin_x = x;
+            l.margin_y = y;
+            l.horizontal_alignment = HorizontalAlignment::Free;
+            l.vertical_alignment   = VerticalAlignment::Free;
+            l.position_dirty = true;
+            true
         } else { false }
     }
 
@@ -351,9 +366,9 @@ impl TextLabelHandle {
     }
 
     /// Set the horizontal alignment / resize anchor.  Returns `false` if removed.
-    pub fn set_alignment(&self, overlay: &mut crate::text_overlay::TextOverlay, alignment: HorizontalAlignment) -> bool {
+    pub fn set_horizontal_alignment(&self, overlay: &mut crate::text_overlay::TextOverlay, alignment: HorizontalAlignment) -> bool {
         if let Some(l) = overlay.labels.get_mut(&self.id) {
-            l.alignment = alignment; true
+            l.horizontal_alignment = alignment; true
         } else { false }
     }
 
