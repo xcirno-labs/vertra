@@ -31,7 +31,6 @@ use vertra::window::Window;
 use vertra::transform::Transform;
 use vertra::geometry::Geometry;
 use vertra::objects::Object;
-use vertra::editor::{EditorStateEvent, GizmoMode, DragAxis};
 
 struct AppState {
     sun_id: Option<usize>,
@@ -101,36 +100,6 @@ fn main() {
             // Rotate the Planet (Earth)
             if let Some(planet) = state.earth_id.and_then(|id| scene.world.get_mut(id)) {
                 planet.transform.rotation[1] += 100.0 * ctx.dt;
-            }
-        })
-        // on_editor_event fires whenever the editor's internal state changes:
-        //   • T / R / E keys  →  GizmoModeChanged
-        //   • Gizmo axis drag →  DragStart / DragEnd
-        // on_update is suppressed in editor mode, so game logic here is safe.
-        .on_editor_event(|_state, _scene, event, object| {
-            match event {
-                EditorStateEvent::GizmoModeChanged(mode) => {
-                    let label = match mode {
-                        GizmoMode::Translate => "Translate",
-                        GizmoMode::Rotate    => "Rotate",
-                        GizmoMode::Scale     => "Scale",
-                    };
-                    println!("[Editor] Gizmo mode → {label} {object:?}");
-                }
-                EditorStateEvent::DragStart { axis } => {
-                    let label = match axis {
-                        DragAxis::X => "X",
-                        DragAxis::Y => "Y",
-                        DragAxis::Z => "Z",
-                    };
-                    println!("[Editor] Drag started — axis: {label} {object:?}");
-                }
-                EditorStateEvent::DragEnd => {
-                    println!("[Editor] Drag ended {object:?}");
-                }
-                EditorStateEvent::SelectionChanged => {
-                    println!("[Editor] Selection changed {object:?}");
-                }
             }
         })
         .create();

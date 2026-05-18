@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 use vertra::text_overlay::TextOverlay as CoreTextOverlay;
-use vertra::text_label::TextLabelHandle;
+use vertra::text_label::{TextLabelHandle, VerticalAlignment};
 
 /// Screen-space text overlay, accessible as `scene.text_overlay`.
 ///
@@ -14,8 +14,8 @@ use vertra::text_label::TextLabelHandle;
 /// // Create a label with default font
 /// const label = ov.add_label('Score: 0', [20, 20], 24, [1, 1, 1, 1]);
 ///
-/// // Create a label with specific font
-/// const label2 = ov.add_label('HP: 100', [20, 50], 24, [0, 1, 0, 1], 'roboto');
+/// // Create a label with specific font and alignment
+/// const label2 = ov.add_label('HP: 100', [20, 50], 24, [0, 1, 0, 1], 'roboto', null, 'right', 'bottom');
 ///
 /// // Mutate via setters
 /// label.text      = 'Score: 100';
@@ -59,13 +59,14 @@ impl TextOverlay {
 
     /// Add a screen-space text label.
     ///
-    /// * `text`      - String to display.
-    /// * `position`  - `[x, y]` pixel position from the top-left corner.
-    /// * `font_size` - Font size in pixels.
-    /// * `color`     - `[r, g, b, a]` in `[0.0, 1.0]`.
-    /// * `font_id`   - Optional font ID string. Pass `undefined`/`null` to use the default font (index 0).
-    /// * `zindex`    - Optional draw order. Lower values render first (further back).
-    ///                 Pass `undefined`/`null` to default to insertion order.
+    /// * `text`               - String to display.
+    /// * `position`           - `[x, y]` pixel position from the top-left corner.
+    /// * `font_size`          - Font size in pixels.
+    /// * `color`              - `[r, g, b, a]` in `[0.0, 1.0]`.
+    /// * `font_id`            - Optional font ID string.
+    /// * `zindex`             - Optional draw order. Lower values render first (further back).
+    /// * `alignment`          - Optional horizontal anchor: `"left"` (default), `"center"`, or `"right"`.
+    /// * `vertical_alignment` - Optional vertical anchor: `"top"` (default), `"middle"`, or `"bottom"`.
     ///
     /// Returns a [`TextLabel`] handle.
     pub fn add_label(
@@ -76,15 +77,21 @@ impl TextOverlay {
         color: Vec<f32>,
         font_id: Option<String>,
         zindex: Option<i32>,
+        alignment: Option<String>,
+        vertical_alignment: Option<String>,
     ) -> TextLabel {
         let (x, y) = if position.len() >= 2 { (position[0], position[1]) } else { (0.0, 0.0) };
         let c = pad4(&color);
+        let align   = parse_alignment(alignment.as_deref());
+        let valign  = parse_vertical_alignment(vertical_alignment.as_deref());
         let id = unsafe {
             let mut builder = (*self.inner)
                 .add_label(text)
                 .at(x, y)
                 .with_font_size(font_size)
-                .with_color(c);
+                .with_color(c)
+                .with_horizontal_alignment(align)
+                .with_vertical_alignment(valign);
             if let Some(fid) = font_id {
                 builder = builder.with_font(fid);
             }
@@ -116,11 +123,13 @@ impl TextOverlay {
 ///
 /// ```js
 /// const label = scene.text_overlay.add_label('Score: 0', [20, 20], 24, [1, 1, 1, 1]);
-/// label.text      = 'Score: 100';
-/// label.color     = [1, 0, 0, 1];
-/// label.position  = [40, 40];
-/// label.font_size = 32;
-/// label.visible   = false;
+/// label.text               = 'Score: 100';
+/// label.color              = [1, 0, 0, 1];
+/// label.position           = [40, 40];
+/// label.font_size          = 32;
+/// label.visible            = false;
+/// label.alignment          = 'center';
+/// label.vertical_alignment = 'middle';
 /// label.remove();
 /// ```
 #[wasm_bindgen]
@@ -187,6 +196,22 @@ impl TextLabel {
         unsafe { TextLabelHandle { id: self.id }.set_zindex(&mut *self.overlay, z); }
     }
 
+    /// Set the horizontal alignment / resize anchor.
+    /// Accepted values: `"left"` (default), `"center"`, `"right"`, `free`.
+    #[wasm_bindgen(setter)]
+    pub fn set_horizontal_alignment(&mut self, alignment: String) {
+        let a = parse_alignment(Some(&alignment));
+        unsafe { TextLabelHandle { id: self.id }.set_horizontal_alignment(&mut *self.overlay, a); }
+    }
+
+    /// Set the vertical alignment / resize anchor.
+    /// Accepted values: `"top"` (default), `"middle"`, `"bottom"`, `free`.
+    #[wasm_bindgen(setter)]
+    pub fn set_vertical_alignment(&mut self, alignment: String) {
+        let a = parse_vertical_alignment(Some(&alignment));
+        unsafe { TextLabelHandle { id: self.id }.set_vertical_alignment(&mut *self.overlay, a); }
+    }
+
     /// Remove the label from the overlay.  Returns `true` if it existed.
     pub fn remove(&mut self) -> bool {
         unsafe { TextLabelHandle { id: self.id }.remove(&mut *self.overlay) }
@@ -201,3 +226,24 @@ fn pad4(v: &[f32]) -> [f32; 4] {
         v.get(3).copied().unwrap_or(1.0),
     ]
 }
+
+fn parse_alignment(s: Option<&str>) -> vertra::text_label::HorizontalAlignment {
+    use vertra::text_label::HorizontalAlignment;
+    match s {
+        Some("center") => HorizontalAlignment::Center,
+        Some("right")  => HorizontalAlignment::Right,
+        Some("free")   => HorizontalAlignment::Free,
+        _              => HorizontalAlignment::Left,
+    }
+}
+
+fn parse_vertical_alignment(s: Option<&str>) -> vertra::text_label::VerticalAlignment {
+    use vertra::text_label::VerticalAlignment;
+    match s {
+        Some("middle") => VerticalAlignment::Middle,
+        Some("bottom") => VerticalAlignment::Bottom,
+        Some("free")   => VerticalAlignment::Free,
+        _              => VerticalAlignment::Top,
+    }
+}
+

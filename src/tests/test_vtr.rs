@@ -181,9 +181,9 @@ fn empty_scene_roundtrip() {
 
 #[test]
 fn empty_scene_minimum_size() {
-    // header(20) + camera(60) + roots_count(4) = 84 bytes minimum
+    // header(20) + camera(60) + roots_count(4) + overlay_next_id(4) + label_count(4) = 92 bytes
     let bytes = serialize(&test_camera(), &World::new());
-    assert_eq!(bytes.len(), 84, "minimum file size should be 84 bytes");
+    assert_eq!(bytes.len(), 92, "minimum file size should be 92 bytes (V3)");
 }
 
 // camera round-trip

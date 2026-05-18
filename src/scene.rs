@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::camera::Camera;
-use crate::editor::{EditorEvent, EditorState, InspectorData};
+use crate::editor::{EditorEvent, EditorState, EditorStateEvent, InspectorData};
 use crate::mesh::{MeshData, MeshRegistry};
 use crate::pipeline::{Pipeline, RenderStats};
 use crate::text_overlay::TextOverlay;
@@ -169,26 +169,69 @@ impl Scene {
         // Rebuild per-label GPU resources only when the label is dirty.
         // Collect label snapshots first to avoid borrowing self.text_overlay while
         // we also need self.pipeline and self.text_quad_cache.
-        // Tuple: (id, visible, dirty, x, y, zindex)
-        let mut label_snapshots: Vec<(usize, bool, bool, f32, f32, i32)> = self
+        // Tuple: (id, visible, dirty, position_dirty, x, y, zindex)
+        let mut label_snapshots: Vec<(usize, bool, bool, bool, f32, f32, i32)> = self
             .text_overlay
             .labels()
-            .map(|l| (l.id, l.visible, l.dirty, l.x, l.y, l.zindex))
+            .map(|l| (l.id, l.visible, l.dirty, l.position_dirty, l.x, l.y, l.zindex))
             .collect();
 
         // Sort by zindex so lower values are drawn first (further back).
         label_snapshots.sort_by_key(|(.., z)| *z);
 
-        for (id, _visible, dirty, x, y, _z) in &label_snapshots {
-            let needs_rebuild = *dirty || !self.text_quad_cache.contains_key(id);
-            if needs_rebuild {
-                // O(1) lookup via HashMap key.
-                if let Some(label) = self.text_overlay.labels.get(id) {
-                    if let Some((pixels, w, h)) = self.text_overlay.rasterize_label(label) {
+        for (id, _visible, dirty, position_dirty, x, y, _z) in &label_snapshots {
+            let needs_full_rebuild = *dirty || !self.text_quad_cache.contains_key(id);
+            if needs_full_rebuild {
+                // Clone the label to avoid holding both &self.text_overlay and &mut self.text_overlay.
+                let maybe_label = self.text_overlay.labels.get(id).map(|l| l.clone());
+                if let Some(label) = maybe_label {
+                    if let Some((pixels, w, h)) = self.text_overlay.rasterize_label(&label) {
                         if w > 0 && h > 0 && !pixels.is_empty() {
-                            let quad = self.pipeline.create_text_quad(*x, *y, w, h, &pixels);
+                            // Resolve semantic at() values to absolute screen pixels based
+                            // on alignment, then write back so resize / editor-drag work
+                            // correctly from this point on.
+                            let vp_w = self.pipeline.surface_config.width  as f32;
+                            let vp_h = self.pipeline.surface_config.height as f32;
+                            let screen_x = resolve_screen_x(&label, w as f32, vp_w);
+                            let screen_y = resolve_screen_y(&label, h as f32, vp_h);
+                            let quad = self.pipeline.create_text_quad(screen_x, screen_y, w, h, &pixels);
                             self.text_quad_cache.insert(*id, quad);
+                            // Store actual bitmap size so the editor selection
+                            // box can use real dimensions instead of estimates.
+                            if let Some(lbl) = self.text_overlay.labels.get_mut(id) {
+                                lbl.rasterized_w = w;
+                                lbl.rasterized_h = h;
+                                // Record the font size used for this bake so the
+                                // draft-mode path can compute the scale ratio.
+                                lbl.rasterized_font_size = lbl.font_size;
+                                // Record the viewport size used for this bake.
+                                lbl.rasterized_vp_w = vp_w;
+                                lbl.rasterized_vp_h = vp_h;
+                                // Write back absolute screen coords so resize /
+                                // editor drag see consistent coordinates.
+                                lbl.x = screen_x;
+                                lbl.y = screen_y;
+                            }
                         }
+                    }
+                }
+            } else if *position_dirty {
+                // Position-only change, or draft resize (font_size changed but no
+                // re-rasterise yet).  Scale the quad from the cached bitmap size
+                // using the ratio font_size / rasterized_font_size so the text
+                // appears at the correct visual size without any GPU texture work.
+                let (rw, rh, rfs, cur_fs) = self.text_overlay.labels.get(id)
+                    .map(|l| (l.rasterized_w, l.rasterized_h,
+                              l.rasterized_font_size, l.font_size))
+                    .unwrap_or((0, 0, 0.0, 0.0));
+                if rw > 0 && rh > 0 {
+                    let scale = if rfs > 0.0 { cur_fs / rfs } else { 1.0 };
+                    let disp_w = rw as f32 * scale;
+                    let disp_h = rh as f32 * scale;
+                    if let Some(quad) = self.text_quad_cache.get_mut(id) {
+                        let (verts, indices) =
+                            TextOverlay::build_quad(*x, *y, disp_w, disp_h);
+                        quad.mesh = self.pipeline.create_baked_mesh(&verts, &indices);
                     }
                 }
             }
@@ -197,6 +240,7 @@ impl Scene {
         // Clear dirty flags now that GPU resources are up-to-date.
         for label in self.text_overlay.labels.values_mut() {
             label.dirty = false;
+            label.position_dirty = false;
         }
 
         // Prune cache entries for labels that have been removed.
@@ -213,7 +257,13 @@ impl Scene {
 
         let camera = &self.camera;
         let skybox = self.editor.as_ref().and_then(|ed| ed.skybox.as_ref());
-        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref(), &text_quad_refs)
+
+        // Build the label selection overlay (border + resize handle) when in editor mode.
+        let label_sel_baked = self.editor.as_ref()
+            .and_then(|ed| ed.label_selection_overlay(&self.text_overlay))
+            .map(|(v, i)| self.pipeline.create_baked_mesh(&v, &i));
+
+        self.pipeline.render_scene(camera, &world_batches, skybox, overlay_baked.as_ref(), label_sel_baked.as_ref(), &text_quad_refs)
     }
 
     /// Switch into static editor mode.
@@ -276,7 +326,7 @@ impl Scene {
 
     /// Feed a platform-agnostic [`EditorEvent`] into the editor.
     ///
-    /// In most cases you do not call this manually — `window.rs` converts
+    /// In most cases you do not call this manually, `window.rs` converts
     /// winit events and calls this automatically when editor mode is active.
     /// Advance per-frame editor logic (WASD camera movement).
     /// Called automatically by the window loop every frame when editor mode is active.
@@ -288,15 +338,19 @@ impl Scene {
 
     /// Feed a platform-agnostic [`EditorEvent`] into the editor.
     ///
-    /// **Default keybind — `Escape`:** pressing Escape while editor mode is
+    /// **Default keybind - `Escape`:** pressing Escape while editor mode is
     /// active automatically calls [`Self::disable_editor_mode`], switching the
     /// engine to play mode before any further processing occurs.
-    pub fn handle_editor_event(&mut self, event: EditorEvent) {
-        if self.editor.is_none() { return; }
-
-
+    /// Returns an [`EditorStateEvent`] when the label editor produced a state
+    /// change (selection, move, or resize), or `None` otherwise.
+    pub fn handle_editor_event(&mut self, event: EditorEvent) -> Option<EditorStateEvent> {
+        if self.editor.is_none() { return None; }
         if let Some(ed) = &mut self.editor {
+            let overlay_ev = ed.process_overlay(&mut self.text_overlay, &event);
             ed.process(&mut self.camera, &mut self.world, event);
+            overlay_ev
+        } else {
+            None
         }
     }
 
@@ -376,7 +430,41 @@ impl Scene {
     }
 }
 
-/// Traverse the object hierarchy and accumulate each object's mesh geometry
+/// Resolve the absolute screen-x for a label.
+///
+/// * `Left`   - `margin_x` is the left-edge distance → returned as-is.
+/// * `Center` - `margin_x` is ignored → returns `(vp_w − text_w) / 2`.
+/// * `Right`  - `margin_x` is the right-edge distance → `vp_w − margin_x − text_w`.
+/// * `Free`   - `label.x` is an absolute pixel coordinate → returned as-is.
+#[inline]
+fn resolve_screen_x(label: &crate::text_label::TextLabel, text_w: f32, vp_w: f32) -> f32 {
+    use crate::text_label::HorizontalAlignment;
+    match label.horizontal_alignment {
+        HorizontalAlignment::Left   => label.margin_x,
+        HorizontalAlignment::Center => (vp_w - text_w) * 0.5,
+        HorizontalAlignment::Right  => vp_w - label.margin_x - text_w,
+        HorizontalAlignment::Free   => label.x,
+    }
+}
+
+/// Resolve the absolute screen-y for a label.
+///
+/// * `Top`    - `margin_y` is the top-edge distance → returned as-is.
+/// * `Middle` - `margin_y` is ignored → returns `(vp_h − text_h) / 2`.
+/// * `Bottom` - `margin_y` is the bottom-edge distance → `vp_h − margin_y − text_h`.
+/// * `Free`   - `label.y` is an absolute pixel coordinate → returned as-is.
+#[inline]
+fn resolve_screen_y(label: &crate::text_label::TextLabel, text_h: f32, vp_h: f32) -> f32 {
+    use crate::text_label::VerticalAlignment;
+    match label.vertical_alignment {
+        VerticalAlignment::Top    => label.margin_y,
+        VerticalAlignment::Middle => (vp_h - text_h) * 0.5,
+        VerticalAlignment::Bottom => vp_h - label.margin_y - text_h,
+        VerticalAlignment::Free   => label.y,
+    }
+}
+
+/// Traverse the entire scene graph and issue a single batched draw call
 /// into a bucket keyed by `texture_path`.  Objects with no geometry are skipped.
 fn collect_by_texture(
     world: &World,

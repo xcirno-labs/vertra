@@ -5,6 +5,7 @@ use winit::keyboard::KeyCode;
 
 use crate::geometry::Geometry;
 use crate::objects::Object;
+use crate::text_label::TextLabel;
 
 /// A snapshot of a selected scene object exposed by the editor inspector.
 ///
@@ -37,6 +38,69 @@ impl InspectorData {
             texture_path:  obj.texture_path.clone(),
         }
     }
+}
+
+/// A snapshot of a selected text label exposed by the editor.
+///
+/// Returned as part of [`EditorStateEvent::LabelSelectionChanged`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LabelInspectorData {
+    /// Unique label ID.
+    pub id:        usize,
+    /// The string being displayed.
+    pub text:      String,
+    /// Horizontal pixel position from the left edge.
+    pub x:         f32,
+    /// Vertical pixel position from the top edge.
+    pub y:         f32,
+    /// Font size in pixels.
+    pub font_size: f32,
+    /// RGBA colour `[r, g, b, a]` in `[0.0, 1.0]`.
+    pub color:     [f32; 4],
+    /// String ID of the font currently used.
+    pub font_id:   String,
+    /// Draw order (lower = further back).
+    pub zindex:    i32,
+}
+
+impl LabelInspectorData {
+    /// Build a snapshot from a live [`TextLabel`].
+    pub fn from_label(label: &TextLabel) -> Self {
+        Self {
+            id:        label.id,
+            text:      label.text.clone(),
+            x:         label.x,
+            y:         label.y,
+            font_size: label.font_size,
+            color:     label.color,
+            font_id:   label.font_id.clone(),
+            zindex:    label.zindex,
+        }
+    }
+}
+
+/// Which label-editor operation is currently active.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LabelDragKind {
+    /// User is dragging the label body to reposition it.
+    Move,
+    /// User is dragging the bottom-right resize handle to change `font_size`.
+    Resize,
+}
+
+/// State for an in-progress label drag.
+#[derive(Debug, Clone)]
+pub struct LabelDragState {
+    /// ID of the label being edited.
+    pub label_id:     usize,
+    /// Which operation is active.
+    pub kind:         LabelDragKind,
+    /// Cursor X at the start of the drag.
+    pub start_cursor: [f32; 2],
+    /// Label `(x, y)` at the start of the drag.
+    pub start_pos:    [f32; 2],
+    /// Label `font_size` at the start of the drag.
+    pub start_size:   f32,
 }
 
 fn geometry_type_name(g: &Geometry) -> String {
@@ -138,10 +202,12 @@ pub enum EditorEvent {
 /// The callback receives both the event **and** a cloned [`Object`] that is
 /// contextually relevant (the selected or dragged object), or `None`:
 ///
-/// * [`GizmoModeChanged`](Self::GizmoModeChanged) — the currently selected object.
-/// * [`DragStart`](Self::DragStart) — the object being dragged.
-/// * [`DragEnd`](Self::DragEnd) — the object that was just being dragged.
-/// * [`SelectionChanged`](Self::SelectionChanged) — the newly selected object, or `None` if deselected.
+/// * [`GizmoModeChanged`](Self::GizmoModeChanged) - the currently selected object.
+/// * [`DragStart`](Self::DragStart) - the object being dragged.
+/// * [`DragEnd`](Self::DragEnd) - the object that was just being dragged.
+/// * [`SelectionChanged`](Self::SelectionChanged) - the newly selected object, or `None` if deselected.
+/// * [`LabelDragStart`](Self::LabelDragStart) - fired once when a label drag begins.
+/// * [`LabelDragEnd`](Self::LabelDragEnd) - fired once when a label drag ends.
 ///
 /// # Example
 ///
@@ -164,6 +230,7 @@ pub enum EditorEvent {
 ///     })
 ///     .create();
 /// ```
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorStateEvent {
     /// The active gizmo mode changed (T / R / E keybinds).
@@ -184,11 +251,30 @@ pub enum EditorStateEvent {
     /// The callback's `obj` parameter is the object that was being transformed.
     DragEnd,
 
-    /// The editor selection changed — an object was clicked or deselected.
+    /// The editor selection changed, an object was clicked or deselected.
     ///
     /// The callback's `obj` parameter is the newly selected object, or `None`
     /// when the selection was cleared.
     SelectionChanged,
+
+    /// The editor label selection changed, a text label was clicked or deselected.
+    ///
+    /// Contains a snapshot of the newly selected label, or `None` when the
+    /// label selection was cleared.
+    LabelSelectionChanged(Option<LabelInspectorData>),
+
+    /// The user started dragging a label (move or resize).
+    ///
+    /// Fired once when the drag begins, analogous to [`DragStart`].
+    LabelDragStart {
+        /// Which label operation is starting.
+        kind: LabelDragKind,
+    },
+
+    /// The user released a label drag (mouse button up).
+    ///
+    /// Contains a final snapshot of the label's state, analogous to [`DragEnd`].
+    LabelDragEnd(LabelInspectorData),
 }
 
 /// Per-frame raw input state maintained by the editor.
