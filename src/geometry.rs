@@ -134,12 +134,12 @@ impl Geometry {
                 let b4 = [-s, -h, -s]; // Back-Left
 
                 // 4 Sides
-                mesh_data.add_transformed_triangle([tip, b1, b2], transform, color); // Front
-                mesh_data.add_transformed_triangle([tip, b2, b3], transform, color); // Right
-                mesh_data.add_transformed_triangle([tip, b3, b4], transform, color); // Back
-                mesh_data.add_transformed_triangle([tip, b4, b1], transform, color); // Left
+                mesh_data.add_transformed_triangle([tip, b2, b1], transform, color); // Front
+                mesh_data.add_transformed_triangle([tip, b3, b2], transform, color); // Right
+                mesh_data.add_transformed_triangle([tip, b4, b3], transform, color); // Back
+                mesh_data.add_transformed_triangle([tip, b1, b4], transform, color); // Left
                 // Base
-                mesh_data.add_transformed_quad([b4, b3, b2, b1], transform, color);
+                mesh_data.add_transformed_quad([b1, b2, b3, b4], transform, color);
             }
             Geometry::Capsule { radius, height, subdivisions } => {
                 let r = *radius;
