@@ -6,7 +6,8 @@
 Vertra is a lightweight, cross-platform 3D rendering engine for Rust, built on top of `wgpu`.
 It provides a streamlined abstraction for hardware-accelerated graphics with a professional
 perspective camera, a safe hierarchical scene graph, a built-in static scene editor,
-a compact binary scene format (VTR), and a WASM/JavaScript binder layer.
+a compact binary scene format (VTR), a screen-space text overlay, a per-object scripting
+system, and a WASM/JavaScript binder layer.
 
 ---
 
@@ -18,9 +19,13 @@ a compact binary scene format (VTR), and a WASM/JavaScript binder layer.
 | **Perspective Camera** | Full view and projection matrix implementation (Y-up, left-handed, WGPU depth range). Builder-pattern construction with WASD + mouse-look helpers. |
 | **Procedural Geometry** | Built-in `Cube`, `Box`, `Plane`, `Pyramid`, `Sphere`, and `Capsule` primitives. Geometry is generated on demand and batched into a single GPU draw call per texture group. |
 | **Texture Support** | Load textures from RGBA data (or a file path on native) and bind them to objects by matching `texture_path`. |
-| **Built-in Editor** | Static scene editor with orbit/pan/zoom camera, translate/rotate/scale gizmos, multi-select, group transform, object picker, and a skybox. Activated with `scene.enable_editor_mode()`. |
+| **Built-in Editor** | Static scene editor with orbit/pan/zoom camera, translate/rotate/scale gizmos, multi-select, group transform, object picker, text-label editing, and a skybox. Activated with `scene.enable_editor_mode()`. |
 | **Fixed-Update Loop** | Separate `on_fixed_update` callback running at 60 Hz for physics-stable simulation. |
-| **VTR Binary Format** | Compact, deterministic, little-endian binary format for saving and loading complete scenes. Roundtrips camera, hierarchy, transforms, colours, geometry, and texture paths. |
+| **Per-Object Scripting** | Attach `ObjectScript` implementations to any scene object. Callbacks: `on_start`, `on_update`, `on_fixed_update`. Deferred world mutations keep script callbacks re-entrancy-safe. |
+| **Screen-Space Text Overlay** | GPU-rasterised HUD labels via `TextOverlay`. Fluent `TextLabelBuilder` API with font management, z-index ordering, and horizontal/vertical alignment anchors. Full editor integration for interactive placement and resizing. |
+| **Per-Frame Metrics** | `FrameContext` exposes smoothed `fps`, `frame_time_ms`, `draw_calls`, and `triangle_count` in every callback. |
+| **Play-Mode Snapshots** | World state is automatically captured on editor entry and restored on exit, giving every play session a clean start. |
+| **VTR Binary Format** | Compact, deterministic, little-endian binary format for saving and loading complete scenes. Roundtrips camera, hierarchy, transforms, colours, geometry, texture paths, and text labels. |
 | **Cross-Platform** | `wgpu` backend supports Vulkan, Metal, DX12, WebGL, and WebGPU. |
 | **WASM / JS Binder** | `binder/` crate exposes the full API to JavaScript via `wasm-bindgen`, including deferred scene-graph events safe from JS re-entrancy. |
 | **Scene-Graph Events** | `World::on_scene_graph_modified` callback fires after every structural mutation (add / delete / reparent). Events are queued and dispatched outside the mutation borrow in the binder. |
@@ -33,7 +38,13 @@ Add Vertra to your Cargo.toml dependencies:
 
 ```toml
 [dependencies]
-vertra = "0.2.0"
+vertra = "0.3.0"
+```
+
+To enable the bundled font stack (sans-serif, serif, and monospace faces):
+
+```toml
+vertra = { version = "0.3.0", features = ["default-fonts"] }
 ```
 
 ---
@@ -144,8 +155,12 @@ fn main() {
 | `math` | Column-major `Matrix4` — identity, perspective, look-at, point projection |
 | `timer` | Simple countdown timer for use in game logic |
 | `window` | Builder-pattern windowing and event-loop host with typed callbacks |
-| `editor` | Static scene editor — orbit cam, gizmos, multi-select, inspector |
-| `vtr` | Binary `.vtr` scene format — read/write for camera + full object hierarchy |
+| `editor` | Static scene editor — orbit cam, gizmos, multi-select, inspector, label editing |
+| `script` | Per-object scripting — `ObjectScript` trait and `ScriptRegistry` |
+| `text_overlay` | Screen-space text overlay — font management, label storage, GPU rasterisation |
+| `text_label` | `TextLabel`, `TextLabelBuilder`, `TextLabelHandle`, `HorizontalAlignment`, `VerticalAlignment` |
+| `frame_stats` | Internal per-frame performance tracker backing `FrameContext` metrics |
+| `vtr` | Binary `.vtr` scene format — read/write for camera + full object hierarchy + text labels |
 | `constants` | Engine-wide default values |
 | `event` | Re-exports of winit event types |
 
@@ -173,23 +188,58 @@ Geometry is **baked** each frame: the scene tree is walked, all object meshes ar
 into `MeshData` builders grouped by `texture_path`, then uploaded to the GPU as a small
 number of batched draw calls. The editor gizmo overlay is rendered as a separate pass.
 
+### Per-Object Scripting
+
+Implement `ObjectScript` and attach it to any scene object via `scene.scripts.attach(id, script)`.
+The runtime invokes `on_start` once on the first update after attachment, then `on_update` every
+frame and `on_fixed_update` at 60 Hz—both only while editor mode is inactive.
+
+World mutations (`spawn`, `delete`, `reparent`) that occur *inside* a script callback are safely
+deferred and applied after the full update iteration completes, preventing borrow conflicts in
+both native and WASM environments. Stale entries whose object has been deleted are pruned
+automatically with an O(1) swap-remove.
+
+### Screen-Space Text Overlay
+
+`scene.text_overlay` is a `TextOverlay` that manages fonts and screen-space labels:
+
+1. Register at least one font: `scene.text_overlay.add_font("sans", font_bytes)`.
+   With the `default-fonts` feature the engine bundles fonts automatically.
+2. Create a label using the fluent builder:
+   ```rust,ignore
+   let fps_label = scene.text_overlay
+       .add_label("FPS: 0")
+       .at(10.0, 10.0)
+       .with_font_size(20.0)
+       .with_color([1.0, 1.0, 0.0, 1.0])
+       .with_horizontal_alignment(HorizontalAlignment::Left)
+       .build();
+   ```
+3. Update later: `fps_label.set_text(&mut scene.text_overlay, &format!("FPS: {:.0}", ctx.fps));`
+
+Labels support `HorizontalAlignment` (`Left`, `Center`, `Right`, `Free`) and
+`VerticalAlignment` (`Top`, `Middle`, `Bottom`, `Free`) anchors that control repositioning on
+window resize. Z-index controls depth ordering when labels overlap.
+
 ### Built-in Editor
 
 Enable with `scene.enable_editor_mode()` in `on_startup`. While active:
 * `on_update`, `on_fixed_update`, and `on_draw_request` are suppressed.
 * Orbit (Alt+drag), pan (middle-drag), and zoom (scroll wheel) control the camera.
 * `T` / `R` / `E` switch between translate, rotate, and scale gizmos.
-* Left-click picks objects; Ctrl+click multi-selects; `G` selects a subtree.
+* Left-click picks objects or text labels; Ctrl+click multi-selects; `G` selects a subtree.
 * `F` focuses the camera on the selection.
-* `Escape` exits editor mode and returns to play mode.
+* Text labels can be **dragged** to reposition and **edge-dragged** to resize font size.
+  A draft mode previews the resize in real-time without re-rasterising until drag-end.
+* `Escape` exits editor mode, **restores the play-mode snapshot**, and returns to play mode.
 
-Use `Window::on_editor_event` to react to gizmo-mode changes, drag start/end, and selection
-changes while the editor is active.
+Use `Window::on_editor_event` to react to gizmo-mode changes, drag start/end, selection
+changes, and label interactions (`LabelSelected`, `LabelDragStart`, `LabelResizeEnd`, …).
 
 ### VTR Binary Format
 
-`.vtr` files store the full camera state and scene hierarchy in a compact little-endian binary
-layout (~84 bytes minimum for an empty scene). Use `scene.save_vtr_file` / `scene.load_vtr_file`
+`.vtr` files store the full camera state, scene hierarchy, and text labels in a compact
+little-endian binary layout. Use `scene.save_vtr_file` / `scene.load_vtr_file`
 on native, or `vtr::write` / `vtr::read` directly on any `Write`/`Read` impl.
 
 ---
