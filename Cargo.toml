@@ -17,6 +17,7 @@ exclude = [
     ".github/",
     "examples/assets/",
     "src/tests/",
+    "docs/"
 ]
 
 [features]
