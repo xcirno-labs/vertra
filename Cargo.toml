@@ -7,7 +7,7 @@ members = [
 [package]
 name = "vertra"
 description = "A cross-platform graphics editor built with Rust and WebAssembly."
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license-file = "LICENSE"
 readme = "README.md"
