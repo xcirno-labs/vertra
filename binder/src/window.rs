@@ -124,13 +124,27 @@ impl WebWindow {
 
     /// Registers a callback fired when editor state changes.
     ///
-    /// Receives a single [`EditorEventType`] object. Events:
-    /// - `gizmo_mode_changed` — active gizmo switched (T / R / E keys)
-    /// - `drag_start` / `drag_end` — gizmo axis drag begins / ends
-    /// - `selection_changed` — inspector selection changed (click or programmatic);
-    ///   `data` is [`InspectorData`] or `null` when cleared
+    /// The callback receives a single `EditorEvent` object tagged by `type`.
+    /// All event shapes are listed in the TypeScript `EditorEvent` union type.
     ///
-    /// Callback signature: `(event: EditorEventType) => void`
+    /// **3D object events**
+    /// - `gizmo_mode_changed` — active gizmo switched (T / R / E keys);
+    ///   `mode` is `"translate"` | `"rotate"` | `"scale"`.
+    /// - `drag_start` — user began dragging a gizmo axis handle;
+    ///   `axis` is `"x"` | `"y"` | `"z"`.
+    /// - `drag_end` — user released a gizmo axis drag.
+    /// - `selection_changed` — inspector selection changed (click or programmatic);
+    ///   `data` is `InspectorData` or `null` when the selection was cleared.
+    ///
+    /// **Text-label events**
+    /// - `label_selection_changed` — a text label was clicked or deselected;
+    ///   `data` is `LabelInspectorData` or `null` when deselected.
+    /// - `label_drag_start` — user began dragging a label (move or resize);
+    ///   `kind` is `"move"` | `"resize"`.
+    /// - `label_drag_end` — user released a label drag;
+    ///   `data` is the final `LabelInspectorData` snapshot.
+    ///
+    /// Callback signature: `(event: EditorEvent) => void`
     pub fn on_editor_event(&mut self, f: Function) { self.on_editor_event = Some(f); }
 
 
@@ -283,7 +297,42 @@ impl WebWindow {
                     };
 
                     if let Some(e) = ed_ev {
-                        scene.handle_editor_event(e);
+                        let overlay_ev = scene.handle_editor_event(e);
+
+                        // Fire label-editor JS callbacks for events returned by the
+                        // overlay processor (selection, drag-start, drag-end).
+                        // Without this the return value was silently discarded and
+                        // label_selection_changed / label_drag_start / label_drag_end
+                        // were never emitted when events arrived through the winit loop.
+                        if let Some(ref lev) = overlay_ev {
+                            if let Some(cb) = &on_editor_ev_fn {
+                                use vertra::editor::EditorStateEvent;
+                                let web_ev: Option<WebEditorEvent> = match lev {
+                                    EditorStateEvent::LabelSelectionChanged(data) => {
+                                        let js_data = data.as_ref().map(crate::editor::JsLabelInspectorData::from);
+                                        Some(WebEditorEvent::LabelSelectionChanged { data: js_data })
+                                    }
+                                    EditorStateEvent::LabelDragStart { kind } => {
+                                        let kind_str = match kind {
+                                            vertra::editor::LabelDragKind::Move   => "move",
+                                            vertra::editor::LabelDragKind::Resize => "resize",
+                                        };
+                                        Some(WebEditorEvent::LabelDragStart { kind: kind_str.to_string() })
+                                    }
+                                    EditorStateEvent::LabelDragEnd(data) => {
+                                        Some(WebEditorEvent::LabelDragEnd {
+                                            data: crate::editor::JsLabelInspectorData::from(data),
+                                        })
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(ev) = web_ev {
+                                    if let Ok(js) = serde_wasm_bindgen::to_value(&ev) {
+                                        let _ = cb.call1(&JsValue::UNDEFINED, &js);
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // Selection_changed
