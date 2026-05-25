@@ -141,7 +141,7 @@ pub struct WasmScript {
     pub on_fixed_update_fn: Option<Function>,
 }
 
-#[wasm_bindgen(js_name = JsScript)]
+#[wasm_bindgen(js_name = "JsScript")]
 impl WasmScript {
     /// Create a new script from an options object with optional callback fields.
     ///

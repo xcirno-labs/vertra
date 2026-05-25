@@ -36,7 +36,7 @@ struct InternalObjectOptions {
 /// Objects hold a name, a [`Transform`] (position / rotation / scale), and
 /// optional geometry and colour data.  Spawn them into a scene with
 /// [`Scene::spawn`] or [`World::spawn_object`].
-#[wasm_bindgen(js_name = VertraObject)]
+#[wasm_bindgen(js_name = "VertraObject")]
 pub struct Object {
     #[wasm_bindgen(skip)]
     pub inner: *mut CoreObject,
@@ -44,7 +44,7 @@ pub struct Object {
     pub owned: bool,
 }
 
-#[wasm_bindgen(js_name = VertraObject)]
+#[wasm_bindgen(js_name = "VertraObject")]
 impl Object {
     /// Creates a new scene object template.
     ///

@@ -49,10 +49,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install wasm-bindgen-cli matching Cargo.toml
-        uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-bindgen-cli@0.2.117
+      - name: Install wasm-pack
+        run: curl https://wasm-bindgen.github.io/wasm-pack/installer/init.sh -sSf | bash
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -63,4 +61,4 @@ jobs:
 
       - name: Run Binder tests
         working-directory: ./binder
-        run: wasm-pack test --node -- --no-headless
+        run: wasm-pack test --node
