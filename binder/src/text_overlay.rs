@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 use vertra::text_overlay::TextOverlay as CoreTextOverlay;
-use vertra::text_label::{TextLabelHandle, VerticalAlignment};
+use vertra::text_label::{TextLabelHandle};
 
 /// Screen-space text overlay, accessible as `scene.text_overlay`.
 ///
