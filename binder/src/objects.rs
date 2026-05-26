@@ -44,7 +44,7 @@ pub struct Object {
     pub owned: bool,
 }
 
-#[wasm_bindgen(js_name = "VertraObject")]
+#[wasm_bindgen(js_class = "VertraObject")]
 impl Object {
     /// Creates a new scene object template.
     ///

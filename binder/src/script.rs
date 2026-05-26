@@ -131,7 +131,7 @@ export interface SceneScriptMethods {
 ///
 /// Create one with the constructor, supplying up to three callback functions,
 /// then attach it to an object ID via [`Scene::attach_script`].
-#[wasm_bindgen(js_name = JsScript)]
+#[wasm_bindgen(js_name = "JsScript")]
 pub struct WasmScript {
     #[wasm_bindgen(skip)]
     pub on_start_fn:        Option<Function>,
@@ -141,7 +141,7 @@ pub struct WasmScript {
     pub on_fixed_update_fn: Option<Function>,
 }
 
-#[wasm_bindgen(js_name = "JsScript")]
+#[wasm_bindgen(js_class = "JsScript")]
 impl WasmScript {
     /// Create a new script from an options object with optional callback fields.
     ///
