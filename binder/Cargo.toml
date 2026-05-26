@@ -13,7 +13,8 @@ js-sys = "0.3.94"
 winit = "0.29.15"
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3"
+wasm-bindgen-test = "0.3.72"
+
 
 [lib]
 crate-type = ["cdylib", "rlib"]
